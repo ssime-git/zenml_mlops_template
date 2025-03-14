@@ -1,0 +1,10 @@
+[project]
+name = "zenml-mlops-template"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pip>=25.0.1",
+    "zenml>=0.75.0",
+]
