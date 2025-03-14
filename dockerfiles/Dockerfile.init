@@ -1,0 +1,13 @@
+# Dockerfile.init
+FROM python:3.9-slim
+
+# Install Python dependencies
+RUN pip install zenml requests
+
+# Set up working directory
+WORKDIR /app
+
+# Copy the initialization script
+COPY init_zenml.py /app/init_zenml.py
+
+# The entrypoint will be defined in docker-compose.yml

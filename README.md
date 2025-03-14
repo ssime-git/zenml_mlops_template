@@ -92,6 +92,7 @@ zenml_mlops_template/
 │   └── iris_preprocessed.csv  # Preprocessed data
 ├── dockerfiles/               # Dockerfiles for each service
 │   ├── Dockerfile.inference   # Dockerfile for the inference service
+│   ├── Dockerfile.monitor     # Dockerfile for the retraining monitor
 │   ├── Dockerfile.preprocess  # Dockerfile for data preprocessing
 │   └── Dockerfile.train       # Dockerfile for model training
 ├── src/                       # Source code
@@ -101,11 +102,14 @@ zenml_mlops_template/
 │   │   └── train_model.py     # Model training script
 │   └── services/              # Service components
 │       ├── __init__.py
-│       └── inference/         # Inference service
+│       ├── inference/         # Inference service
+│       │   ├── __init__.py
+│       │   └── inference_service.py # FastAPI inference service
+│       └── monitor/           # Monitor service
 │           ├── __init__.py
-│           └── inference_service.py # FastAPI inference service
+│           ├── monitor_service.py # Retraining monitor service
+│           └── run_monitor.py # Entry point for monitor service
 ├── docker-compose.yml         # Docker Compose configuration
-├── monitor_retrain.py         # Retraining monitor script
 └── run_pipeline.py            # ZenML pipeline runner
 ```
 
@@ -127,24 +131,14 @@ cd zenml_mlops_template
 ### 2. Start the Services
 
 ```bash
-# Build and start all services
+# Build and start all services (including the retraining monitor)
 docker-compose up -d
 
 # Check that all services are running
 docker-compose ps
 ```
 
-### 3. Start the Retraining Monitor
-
-```bash
-# Make the script executable
-chmod +x monitor_retrain.py
-
-# Start the monitor script
-python monitor_retrain.py
-```
-
-### 4. Test the Pipeline
+### 3. Test the Pipeline
 
 ```bash
 # Check the health of the inference service
@@ -208,71 +202,145 @@ You can verify the model status using the health endpoint:
 curl http://localhost:8000/health
 ```
 
-## Monitoring and Metrics
+## Current Project Status
 
-### MLflow Experiment Tracking
+### Authentication with ZenML
 
-Access the MLflow UI to view experiment runs, parameters, metrics, and artifacts:
+The project is currently facing authentication challenges with ZenML 0.75.0. Here's the current status:
 
-```
-http://localhost:5001
-```
+1. **Authentication Approach**: 
+   - Using direct username/password authentication with the ZenML server
+   - Environment variables are set in docker-compose.yml for authentication:
+     ```yaml
+     - ZENML_SERVER_URL=http://zenml:8080
+     - ZENML_STORE_URL=http://zenml:8080
+     - ZENML_DEFAULT_USERNAME=admin
+     - ZENML_DEFAULT_PASSWORD=P@ssword123$
+     - ZENML_AUTO_ACCEPT_PROMPTS=true
+     ```
 
-### Prometheus Metrics
+2. **Current Issues**:
+   - Authentication with ZenML server fails in the train-model service
+   - The ZenML CLI login command syntax has changed in version 0.75.0
+   - The Python client authentication flow needs to be updated
 
-Access the Prometheus UI to view metrics:
+3. **Attempted Solutions**:
+   - Updated run_pipeline.py to use explicit login with ZenML CLI
+   - Modified the stack setup to use the Python client directly
+   - Simplified the authentication flow in docker-compose.yml
 
-```
-http://localhost:9090
-```
+### Next Steps
 
-Try querying the `prediction_requests_total` metric to see the number of prediction requests.
+To resolve the authentication issues, the following steps are recommended:
 
-### Grafana Dashboards
+1. **Check ZenML Documentation**:
+   - Review the latest ZenML 0.75.0 documentation for authentication changes
+   - Verify the correct CLI login command syntax
 
-Access Grafana to create dashboards for monitoring:
+2. **Update Authentication Approach**:
+   - Consider using a service account with an API key for non-interactive workloads
+   - Update the run_pipeline.py file with the correct authentication flow
 
-```
-http://localhost:3000
-```
+3. **Test Authentication Separately**:
+   - Create a simple script to test ZenML authentication in isolation
+   - Verify that the authentication works before integrating with the pipeline
 
-Default login:
-- Username: admin
-- Password: admin
+4. **Alternative Approaches**:
+   - Consider using environment variables directly for authentication
+   - Explore using a configuration file for authentication
 
-Configure Prometheus as a data source and create dashboards to visualize metrics.
+## Monitoring and Retraining
 
-## Customizing the Pipeline
+Despite the authentication challenges, the monitoring and retraining architecture is fully implemented:
 
-To customize the pipeline for your own use case:
+1. The monitor service is containerized and runs as a dedicated service in Docker Compose
+2. The retraining flow using signal files is implemented and ready to use
+3. The inference service is configured to trigger retraining and load new models
 
-1. Modify the data preprocessing step in `src/pipeline/data_preprocess.py`
-2. Update the model training step in `src/pipeline/train_model.py`
-3. Adjust the inference service to handle your specific input and output formats
-4. Update the Dockerfiles if you need additional dependencies
+Once the authentication issues are resolved, the full MLOps pipeline with automated retraining will be operational.
+
+## ZenML API Key Authentication
+
+The training service connects to the ZenML UI using API key authentication, which is the recommended approach for non-interactive environments like Docker containers in ZenML 0.75.0.
+
+### Setting Up ZenML API Key
+
+1. Make sure you have ZenML CLI installed:
+   ```bash
+   pip install zenml==0.75.0
+   ```
+
+2. Run the provided setup script to create a service account and generate an API key:
+   ```bash
+   python setup_zenml_api_key.py
+   ```
+   
+   This script will:
+   - Create a ZenML service account named "training-service"
+   - Generate an API key for this service account
+   - Save the API key to a `.env` file for use with docker-compose
+
+3. Start the services with the API key:
+   ```bash
+   docker-compose up -d
+   ```
+
+### Manual API Key Setup
+
+If you prefer to set up the API key manually:
+
+1. Create a service account and generate an API key:
+   ```bash
+   zenml service-account create training-service
+   ```
+
+2. Copy the generated API key and create a `.env` file with:
+   ```
+   ZENML_API_KEY=your_generated_api_key
+   ```
+
+3. Start the services:
+   ```bash
+   docker-compose up -d
+   ```
+
+### How It Works
+
+- The `docker-compose.yml` file is configured to pass the API key to the training service
+- The training service uses this API key to authenticate with the ZenML server
+- This enables the training pipeline to register and track experiments in the ZenML UI
+- You can view pipeline runs, experiments, and artifacts in the ZenML UI at http://localhost:8080
 
 ## Troubleshooting
 
-If you encounter issues:
+If you encounter authentication issues with ZenML, try the following:
 
-1. Check container logs: `docker-compose logs <service-name>`
-2. Verify that all services are running: `docker-compose ps`
-3. Ensure data directories exist and have proper permissions
-4. Check the health endpoint of the inference service: `curl http://localhost:8000/health`
-5. Verify the monitor script is running: `ps aux | grep monitor_retrain.py`
+1. Verify that the ZenML server is running:
+   ```bash
+   docker-compose ps zenml
+   ```
 
-## Shutting Down
+2. Check the ZenML server logs:
+   ```bash
+   docker-compose logs zenml
+   ```
 
-To stop all services:
+3. Try connecting to the ZenML server manually:
+   ```bash
+   docker exec -it zenml_mlops_template-train-model-1 bash
+   zenml login --server http://zenml:8080
+   ```
 
-```bash
-# Stop the monitor script (find its PID first)
-ps aux | grep monitor_retrain.py
-kill <PID>
+4. Verify the environment variables in the container:
+   ```bash
+   docker exec -it zenml_mlops_template-train-model-1 env | grep ZENML
+   ```
 
-# Stop all containers
-docker-compose down
-```
+## Resources
+
+- [ZenML Documentation](https://docs.zenml.io/)
+- [ZenML Authentication Guide](https://docs.zenml.io/how-to/project-setup-and-management/connecting-to-zenml)
+- [MLflow Documentation](https://mlflow.org/docs/latest/index.html)
 
 ## 1. Setting Up Your Environment
 
@@ -324,7 +392,7 @@ Verify that the ZenML server is running by navigating to http://localhost:8888 i
 With your virtual environment active, connect to the running ZenML server:
 
 ```bash
-zenml connect --url http://localhost:8888 --username admin --password zenml
+zenml connect --url http://localhost:8080 --username admin --password P@ssword123$
 ```
 
 Initialize your ZenML repository:
@@ -497,6 +565,7 @@ If you encounter issues:
 To stop all services:
 
 ```bash
+# Stop all containers including the monitor
 docker-compose down
 ```
 

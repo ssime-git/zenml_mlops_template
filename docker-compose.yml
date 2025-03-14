@@ -1,49 +1,14 @@
+version: '3.8'
+
 services:
-  mysql:
-    image: mysql:8.0
-    ports:
-      - "3306:3306"
-    environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: zenml
-    volumes:
-      - ./data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  zenml:
-    image: zenmldocker/zenml-server
-    platform: linux/amd64
-    ports:
-      - "8888:8080"
-    environment:
-      ZENML_STORE_URL: mysql://root:password@mysql/zenml
-      ZENML_DEFAULT_USER_NAME: admin
-      ZENML_DEFAULT_USER_PASSWORD: zenml
-      ZENML_DEFAULT_USER_EMAIL: admin@zenml.io
-      ZENML_AUTH_TYPE: default
-      ZENML_STORE_TYPE: sql
-    depends_on:
-      mysql:
-        condition: service_healthy
-
   mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     ports:
       - "5001:5000"
     volumes:
-      - mlflow_data:/mlruns
-    command: >
-      mlflow server 
-      --host 0.0.0.0
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      - ./mlflow-artifacts:/mlflow/artifacts
+    command: mlflow server --host 0.0.0.0 --port 5000 --default-artifact-root /mlflow/artifacts
+    restart: unless-stopped
 
   data-preprocess:
     build:
@@ -51,9 +16,6 @@ services:
       dockerfile: dockerfiles/Dockerfile.preprocess
     volumes:
       - ./data-file:/app/data-file
-    depends_on:
-      - zenml
-      - mysql
 
   train-model:
     build:
@@ -61,11 +23,22 @@ services:
       dockerfile: dockerfiles/Dockerfile.train
     volumes:
       - ./data-file:/app/data-file
+      - ./src:/app/src
     environment:
-      MLFLOW_TRACKING_URI: http://mlflow:5000
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - ZENML_SERVER_URL=http://zenml:8080
+      - ZENML_DISABLE_CLIENT_SERVER_MISMATCH_CHECK=true
+      - ZENML_ANALYTICS_OPT_IN=false
+      - ZENML_STORE_TYPE=rest
+      - ZENML_STORE_URL=http://zenml:8080
+      - ZENML_API_KEY=${ZENML_API_KEY}
+      - ZENML_AUTO_ACCEPT_PROMPTS=true
     depends_on:
-      - data-preprocess
-      - mlflow
+      mlflow:
+        condition: service_started
+      zenml:
+        condition: service_started
+    restart: on-failure
 
   inference-api:
     build:
@@ -73,7 +46,6 @@ services:
       dockerfile: dockerfiles/Dockerfile.inference
     volumes:
       - ./data-file:/app/data-file
-      - /var/run/docker.sock:/var/run/docker.sock
       - .:/app/workspace
     ports:
       - "8000:8000"
@@ -82,6 +54,57 @@ services:
     depends_on:
       - mlflow
     restart: on-failure
+
+  # Retraining Monitor Service
+  retrain-monitor:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.monitor
+    volumes:
+      - ./data-file:/app/data-file
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - SIGNAL_FILE_PATH=/app/data-file/retrain_requested
+      - CHECK_INTERVAL=5
+    restart: always
+    depends_on:
+      - inference-api
+      - train-model
+
+  zenml:
+    image: zenmldocker/zenml-server
+    ports:
+      - "8080:8080"
+    environment:
+      - ZENML_DEFAULT_USER_NAME=admin
+      - ZENML_DEFAULT_USER_PASSWORD=P@ssword123$
+      - ZENML_STORE_TYPE=sql
+      - ZENML_STORE_URL=mysql://root:password@mysql/zenml
+      - ZENML_DEFAULT_PROJECT_NAME=default
+      - ZENML_ANALYTICS_OPT_IN=false
+      - ZENML_LOGGING_VERBOSITY=INFO
+      - ZENML_SERVER_DEPLOYMENT_TYPE=docker
+      - ZENML_DISABLE_CLIENT_SERVER_MISMATCH_CHECK=true
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - zenml_data:/var/lib/zenml
+
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: zenml
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   prometheus:
     image: prom/prometheus:latest
@@ -101,6 +124,7 @@ services:
 
 volumes:
   mlflow_data:
-  mysql_data:
   prometheus_data:
   grafana_data:
+  mysql_data:
+  zenml_data:

@@ -1,0 +1,22 @@
+FROM python:3.9-slim
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker Python SDK
+RUN pip install docker
+
+WORKDIR /app
+
+# Copy the source code
+COPY src/ /app/src/
+
+# Set PYTHONPATH
+ENV PYTHONPATH=/app
+
+# Run the monitor service
+CMD ["python", "src/services/monitor/run_monitor.py"]

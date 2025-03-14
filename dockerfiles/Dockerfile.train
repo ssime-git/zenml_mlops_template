@@ -1,6 +1,32 @@
 # Dockerfile.train
 FROM python:3.9-slim
-RUN pip install pandas scikit-learn mlflow joblib zenml
-COPY src/pipeline/train_model.py /app/train_model.py
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    scikit-learn \
+    pandas \
+    numpy \
+    matplotlib \
+    zenml==0.75.0 \
+    mlflow \
+    requests
+
 WORKDIR /app
-ENTRYPOINT ["python", "train_model.py"]
+
+# Copy pipeline code
+COPY src/ /app/src/
+COPY run_pipeline.py /app/
+
+# Create directories for data and models
+RUN mkdir -p /app/data-file/models
+
+# Set PYTHONPATH
+ENV PYTHONPATH=/app
+
+# Run the pipeline
+CMD ["python", "/app/run_pipeline.py"]
