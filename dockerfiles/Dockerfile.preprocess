@@ -1,0 +1,6 @@
+# Dockerfile.preprocess
+FROM python:3.9-slim
+RUN pip install pandas scikit-learn zenml
+COPY src/pipeline/data_preprocess.py /app/data_preprocess.py
+WORKDIR /app
+ENTRYPOINT ["python", "data_preprocess.py"]

@@ -1,197 +1,519 @@
-# zenml_mlops_template
-MLOPS with zenml
+# End-to-End MLOps Tutorial with ZenML and Docker
 
-Setting Up a Local ZenML Environment with a Dockerized ZenML Server
+This tutorial guides you through setting up and running a complete MLOps pipeline using ZenML and Docker. The project is structured following best practices, with clear separation of concerns and modular components.
 
-This tutorial walks through setting up ZenML locally, using a Dockerized ZenML server for metadata, and deploying an ML pipeline that serves a model via a FastAPI API. We’ll cover creating an isolated Python environment, installing ZenML, launching the ZenML server in Docker, configuring a local stack (orchestrator, artifact store, etc.), and running the pipeline containers. We also demonstrate how to call the FastAPI inference endpoint and monitor the pipeline’s logs, metrics, and experiment tracking dashboards.
+## Architecture Overview
 
-Virtual Environment Setup
+```mermaid
+graph TD
+    subgraph "Data Pipeline"
+        A[Data Preprocessing] --> B[Model Training]
+        B --> C[MLflow]
+    end
+    
+    subgraph "Inference Service"
+        D[FastAPI Service] --> E[Model Loading]
+        E --> F[Prediction Endpoint]
+        G[Retraining Endpoint] --> H[Signal File]
+    end
+    
+    subgraph "Monitoring"
+        I[Prometheus] --> J[Grafana]
+        K[Monitor Script] --> L[Docker Compose]
+    end
+    
+    C -.-> E
+    H -.-> K
+    L -.-> B
+    
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style B fill:#bbf,stroke:#333,stroke-width:2px
+    style C fill:#bfb,stroke:#333,stroke-width:2px
+    style D fill:#fbb,stroke:#333,stroke-width:2px
+    style G fill:#fbf,stroke:#333,stroke-width:2px
+    style K fill:#ff9,stroke:#333,stroke-width:2px
+```
 
-It’s best practice to use a Python virtual environment for this project to isolate dependencies and avoid conflicts ￼ ￼. Follow these steps to create and activate a virtual environment:
-	•	Create a new virtual environment: In your project directory, run python3 -m venv .venv (use py -m venv .venv on Windows) ￼. This command creates a folder (here named .venv) containing a fresh Python installation just for this project.
-	•	Activate the virtual environment: Before installing any packages, activate the environment. On macOS/Linux, use: source .venv/bin/activate. On Windows, run: .venv\Scripts\activate ￼. After activation, your shell prompt may prefix with the environment name, indicating that you’re now using the isolated Python. All pip install operations will install packages into this environment.
+### Components
 
-Once activated, you’re ready to install ZenML and its tools without affecting your system Python.
+1. **Data Pipeline**
+   - **Data Preprocessing**: Loads and preprocesses the Iris dataset
+   - **Model Training**: Trains a RandomForest model and logs to MLflow
+   - **MLflow**: Tracks experiments, metrics, and stores models
 
-ZenML Installation and Connection
+2. **Inference Service**
+   - **FastAPI Service**: Provides REST API endpoints
+   - **Model Loading**: Loads the latest model from MLflow
+   - **Prediction Endpoint**: Serves model predictions
+   - **Retraining Endpoint**: Triggers model retraining
 
-With the virtual environment active, install ZenML and set up the ZenML server and client:
-	1.	Install ZenML (and necessary integrations): Use pip to install ZenML in your environment:
+3. **Monitoring**
+   - **Prometheus**: Collects metrics from the inference service
+   - **Grafana**: Visualizes metrics and creates dashboards
+   - **Monitor Script**: Watches for retraining signals
+   - **Docker Compose**: Orchestrates service restarts for retraining
 
-pip install zenml
+### Retraining Flow
 
-This installs the ZenML CLI and Python SDK ￼. If you plan to use specific libraries (for example, Scikit-learn for model training or MLflow for tracking), install ZenML integrations for them. For instance:
+```mermaid
+sequenceDiagram
+    participant User
+    participant Inference as Inference Service
+    participant Monitor as Monitor Script
+    participant Docker as Docker Compose
+    participant Training as Training Service
+    participant MLflow
+    
+    User->>Inference: POST /retrain
+    Inference->>Inference: Create signal file
+    Inference-->>User: Retraining started response
+    
+    Monitor->>Monitor: Detect signal file
+    Monitor->>Docker: Restart train-model service
+    Docker->>Training: Restart container
+    
+    Training->>Training: Train new model
+    Training->>MLflow: Save model
+    
+    Inference->>Inference: Wait for training
+    Inference->>MLflow: Load latest model
+    
+    User->>Inference: POST /predict
+    Inference->>User: Prediction using new model
+```
 
-zenml integration install sklearn mlflow
+## Project Structure
 
-This ensures ZenML has all the required packages for those integrations ￼. (The zenml CLI acts as a package manager for optional integrations.)
+```
+zenml_mlops_template/
+├── config/                    # Configuration files
+│   └── prometheus.yml         # Prometheus monitoring configuration
+├── data-file/                 # Data directory
+│   └── iris_preprocessed.csv  # Preprocessed data
+├── dockerfiles/               # Dockerfiles for each service
+│   ├── Dockerfile.inference   # Dockerfile for the inference service
+│   ├── Dockerfile.preprocess  # Dockerfile for data preprocessing
+│   └── Dockerfile.train       # Dockerfile for model training
+├── src/                       # Source code
+│   ├── pipeline/              # Pipeline components
+│   │   ├── __init__.py
+│   │   ├── data_preprocess.py # Data preprocessing script
+│   │   └── train_model.py     # Model training script
+│   └── services/              # Service components
+│       ├── __init__.py
+│       └── inference/         # Inference service
+│           ├── __init__.py
+│           └── inference_service.py # FastAPI inference service
+├── docker-compose.yml         # Docker Compose configuration
+├── monitor_retrain.py         # Retraining monitor script
+└── run_pipeline.py            # ZenML pipeline runner
+```
 
-	2.	Prepare a Dockerized ZenML Server: ZenML uses a central server to store metadata (pipelines, artifacts, stack configs, etc.) when in production mode. We will run this server locally using Docker. Create a docker-compose.yml file with the following services:
-	•	MySQL Database: Required by the ZenML server as a metadata store. Use the official MySQL image, exposing the default port:
+## Prerequisites
 
-mysql:
-  image: mysql:8.0
-  ports:
-    - 3306:3306
-  environment:
-    - MYSQL_ROOT_PASSWORD=password
-  volumes:
-    - ./data:/var/lib/mysql
+- Docker and Docker Compose installed
+- Python 3.8+ installed
+- Basic understanding of machine learning concepts
 
+## Setup and Launch
 
-	•	ZenML Server: Use the official ZenML server image. Link it to the MySQL service and provide configuration via environment variables:
+### 1. Clone the Repository
 
-zenml:
-  image: zenmldocker/zenml-server
-  ports:
-    - "8888:8080"
-  environment:
-    - ZENML_STORE_URL=mysql://root:password@host.docker.internal/zenml
-    - ZENML_DEFAULT_USER_NAME=admin
-    - ZENML_DEFAULT_USER_PASSWORD=zenml
-  depends_on:
-    - mysql
+```bash
+git clone https://github.com/yourusername/zenml_mlops_template.git
+cd zenml_mlops_template
+```
 
-In this configuration, ZENML_STORE_URL points the server to the MySQL database (using credentials defined above). We also set a default admin username and password for the ZenML server UI ￼. The port mapping 8888:8080 means the ZenML server’s API (and web UI) will be available on http://localhost:8888.
+### 2. Start the Services
 
-	3.	Launch the ZenML server: Run the Docker Compose setup to start the services. In your terminal (in the same directory as the docker-compose.yml), execute:
-
+```bash
+# Build and start all services
 docker-compose up -d
 
-This builds (if needed) and starts the MySQL and ZenML server containers in detached mode ￼. After a few seconds, both containers should be running. You can verify the status with docker ps (or docker-compose ps), which should list the zenml and mysql services as Up ￼.
+# Check that all services are running
+docker-compose ps
+```
 
-	4.	Verify the ZenML server is running: Open a browser to http://localhost:8888. You should see the ZenML dashboard login page. Log in with the default credentials (admin / zenml) you set in the compose file ￼. After logging in, the ZenML web dashboard will show an initially empty list of pipelines, stack components, etc., since we haven’t run anything yet. (If you encounter issues, check the container logs with docker logs zenml for any errors.)
-	5.	Connect the ZenML client to the server: Now that the server is up, link your local ZenML CLI/SDK to this remote ZenML server. Run the following command in your terminal:
+### 3. Start the Retraining Monitor
 
+```bash
+# Make the script executable
+chmod +x monitor_retrain.py
+
+# Start the monitor script
+python monitor_retrain.py
+```
+
+### 4. Test the Pipeline
+
+```bash
+# Check the health of the inference service
+curl http://localhost:8000/health
+
+# Make a prediction
+curl -X POST -H "Content-Type: application/json" -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}' http://localhost:8000/predict
+
+# Trigger model retraining
+curl -X POST http://localhost:8000/retrain
+```
+
+## Service Endpoints
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Inference API | http://localhost:8000 | FastAPI service for predictions |
+| MLflow | http://localhost:5001 | MLflow UI for experiment tracking |
+| Prometheus | http://localhost:9090 | Prometheus UI for metrics |
+| Grafana | http://localhost:3000 | Grafana for visualization |
+| ZenML | http://localhost:8888 | ZenML Dashboard |
+
+## Model Retraining
+
+The MLOps pipeline supports two methods for model retraining:
+
+### Option 1: Using Docker Compose
+
+To retrain the model using Docker Compose, run:
+
+```bash
+# Restart just the training service
+docker-compose restart train-model
+
+# Or run it specifically
+docker-compose up train-model
+```
+
+### Option 2: Using the API Endpoint
+
+The inference service provides an API endpoint for triggering retraining:
+
+```bash
+# Trigger retraining via API
+curl -X POST http://localhost:8000/retrain
+
+# The response will indicate that retraining has started
+# {"status":"retraining_started","message":"Model retraining has been started in the background. The new model will be used for predictions once training is complete."}
+```
+
+When you use the API endpoint, the following happens:
+1. The inference service creates a signal file in the data-file directory
+2. The monitor script detects the signal file and restarts the train-model service
+3. The train-model service retrains the model and saves it to MLflow
+4. After waiting for the training to complete, the inference service loads the new model
+5. All future predictions use the newly trained model
+
+You can verify the model status using the health endpoint:
+
+```bash
+curl http://localhost:8000/health
+```
+
+## Monitoring and Metrics
+
+### MLflow Experiment Tracking
+
+Access the MLflow UI to view experiment runs, parameters, metrics, and artifacts:
+
+```
+http://localhost:5001
+```
+
+### Prometheus Metrics
+
+Access the Prometheus UI to view metrics:
+
+```
+http://localhost:9090
+```
+
+Try querying the `prediction_requests_total` metric to see the number of prediction requests.
+
+### Grafana Dashboards
+
+Access Grafana to create dashboards for monitoring:
+
+```
+http://localhost:3000
+```
+
+Default login:
+- Username: admin
+- Password: admin
+
+Configure Prometheus as a data source and create dashboards to visualize metrics.
+
+## Customizing the Pipeline
+
+To customize the pipeline for your own use case:
+
+1. Modify the data preprocessing step in `src/pipeline/data_preprocess.py`
+2. Update the model training step in `src/pipeline/train_model.py`
+3. Adjust the inference service to handle your specific input and output formats
+4. Update the Dockerfiles if you need additional dependencies
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Check container logs: `docker-compose logs <service-name>`
+2. Verify that all services are running: `docker-compose ps`
+3. Ensure data directories exist and have proper permissions
+4. Check the health endpoint of the inference service: `curl http://localhost:8000/health`
+5. Verify the monitor script is running: `ps aux | grep monitor_retrain.py`
+
+## Shutting Down
+
+To stop all services:
+
+```bash
+# Stop the monitor script (find its PID first)
+ps aux | grep monitor_retrain.py
+kill <PID>
+
+# Stop all containers
+docker-compose down
+```
+
+## 1. Setting Up Your Environment
+
+### Create and Activate a Virtual Environment
+
+```bash
+# Create the virtual environment
+python -m venv .venv
+
+# Activate the virtual environment
+# On macOS/Linux:
+source .venv/bin/activate
+# On Windows:
+.venv\Scripts\activate
+```
+
+### Install ZenML and Required Integrations
+
+```bash
+pip install zenml
+zenml integration install sklearn mlflow
+```
+
+## 2. Running the Dockerized ZenML Server
+
+The `docker-compose.yml` file defines all the services required for our MLOps pipeline, including:
+- ZenML server with MySQL as the metadata store
+- MLflow tracking server for experiment tracking (using the official MLflow image)
+- Data preprocessing service
+- Model training service
+- FastAPI inference service
+- Prometheus for monitoring
+- Grafana for dashboards
+
+Start the ZenML server and related services:
+
+```bash
+docker-compose up -d zenml mysql mlflow
+```
+
+This will start the ZenML server, MySQL database, and MLflow tracking server in detached mode.
+
+Verify that the ZenML server is running by navigating to http://localhost:8888 in your browser and logging in with:
+- Username: admin
+- Password: zenml
+
+## 3. Configuring the ZenML Stack
+
+With your virtual environment active, connect to the running ZenML server:
+
+```bash
 zenml connect --url http://localhost:8888 --username admin --password zenml
+```
 
-This authenticates your ZenML client with the server at the given URL using the provided credentials ￼. Once connected, any ZenML commands you run (like registering stack components or running pipelines) will be recorded on this ZenML server (instead of a local SQLite store). If the connection is successful, you can test it by running zenml whoami or zenml stack list – it should show the active user as admin and the default stack from the server.
+Initialize your ZenML repository:
 
-	6.	Initialize a ZenML project: In your project directory, initialize ZenML:
-
+```bash
 zenml init
+```
 
-This will set up a .zen/ directory to track ZenML configurations for your project ￼. (If you had a previous ZenML setup in this folder, you might need to remove any existing .zen directory before init to avoid conflicts ￼.) After zenml init, your current directory is registered as a ZenML repository, and you’re ready to configure your stack and pipelines.
+Register and set up your stack components:
 
-Configuring a Local ZenML Stack
-
-A ZenML stack defines the infrastructure and tools on which your pipeline will run ￼. By default, ZenML has a default stack (often using a local filesystem artifact store and local orchestrator), but here we’ll create a custom stack that suits our setup. Specifically, we’ll use a Local Docker Orchestrator to run pipeline steps in isolated Docker containers, a local artifact store to save artifacts, and MLflow for experiment tracking. We’ll register each component and then assemble them into a stack:
-	1.	Register a local artifact store: The artifact store is where ZenML will persist pipeline outputs (datasets, models, etc.). Register a local artifact store pointing to a directory on disk. For example:
-
+```bash
+# Register the local artifact store
 zenml artifact-store register local_store --flavor=local --path=./zenml_artifacts
 
-This creates an artifact store named "local_store" using the local filesystem flavor ￼. The --path=./zenml_artifacts tells it to use the zenml_artifacts folder in the current directory (you can choose any writable path). ZenML will automatically manage artifact sub-folders within this location.
-
-	2.	Register a local Docker orchestrator: The orchestrator is responsible for running pipeline steps. We use the built-in local Docker orchestrator so that each step runs in a container (emulating a production environment while still running on our machine) ￼ ￼. Register it with:
-
+# Register the local Docker orchestrator
 zenml orchestrator register local_docker_orchestrator --flavor=local_docker
 
-This creates an orchestrator named "local_docker_orchestrator" that will execute pipeline steps in Docker containers ￼. Make sure Docker is running, as the orchestrator will use it to spin up containers for each step.
-
-	3.	Register an experiment tracker (MLflow): To log metrics and parameters, we integrate MLflow as an experiment tracker. If you installed the MLflow integration earlier, register the MLflow tracker:
-
+# Register the MLflow experiment tracker
 zenml experiment-tracker register mlflow_tracker --flavor=mlflow
 
-This adds an experiment tracker component named "mlflow_tracker" using MLflow’s tracking service ￼. By default, without additional arguments, this will log to a local MLflow setup (it will use a local mlruns directory for storing runs). We will manually start the MLflow UI later to visualize these runs.
-
-	4.	Create and activate the stack: Now combine the above components into a new stack, and set it as the active stack for your project:
-
+# Register and set the stack
 zenml stack register local_stack \
     -o local_docker_orchestrator \
     -a local_store \
     -e mlflow_tracker \
     --set
+```
 
-Here, -o specifies the orchestrator, -a the artifact store, and -e the experiment tracker for the stack ￼. We name the stack "local_stack" and include the --set flag to mark it as the active stack to use for pipeline runs. After this, running zenml stack describe local_stack should show a table with the components (orchestrator, artifact store, experiment tracker) listed under "local_stack" as configured ￼.
+Verify your active stack:
 
-With the stack configured, your ZenML client knows to use Docker for orchestration, store artifacts in the local directory, and log experiments to MLflow. All these configurations are stored in the ZenML server’s database (under your admin account) as well, which means they are centralized and can be shared if others connect to the same server.
+```bash
+zenml stack describe local_stack
+```
 
-Architecture Overview
+## 4. Running the Pipeline
 
-At this point, it’s helpful to understand the overall architecture of our setup before executing the pipeline. In this ZenML deployment, we have a client-server architecture ￼ with the following key components:
-	•	ZenML Client (your environment): The ZenML Python library and CLI running on your local machine (inside the virtual environment). This is where you define pipelines and steps in code, and where you issue commands to run pipelines. The client is connected to the ZenML server and uses the stack we set up to run the pipeline.
-	•	ZenML Server (Dockerized): A FastAPI-based service running in a Docker container that acts as the central metadata store and coordination hub ￼ ￼. It stores information about pipeline runs, stack configurations, artifacts, and more in its connected database (MySQL in our case). We access its web Dashboard via http://localhost:8888 to view pipeline runs, artifacts, and configurations ￼.
-	•	Orchestrator (Local Docker): Part of our stack, the orchestrator is responsible for executing pipeline steps. The Local Docker Orchestrator runs each step in its own Docker container on the local machine ￼. This provides isolation and reproducibility—each step runs with a controlled environment defined by ZenML (it can package the code and dependencies into images).
-	•	Artifact Store (Local Filesystem): Another stack component, the artifact store is simply a folder (./zenml_artifacts) on the host where ZenML will save outputs from each pipeline step (like trained model files, evaluation results, etc.). The orchestrator’s containers will write to this shared volume so that artifacts persist after containers finish.
-	•	Experiment Tracker (MLflow): An optional stack component we included for experiment tracking. With MLflow integrated, the pipeline steps can log metrics, parameters, and models to MLflow. In our setup, MLflow will log to a local directory (or a local MLflow server if one is running). We will use the MLflow UI to view these experiment runs.
-	•	Model Deployment (FastAPI): After the training pipeline, we will deploy the trained model using a FastAPI application (packaged in a Docker container). This is not managed by ZenML’s stack per se (unless using ZenML’s model deployer), but rather an application we run to serve predictions. It will load the model artifact from the artifact store and provide an HTTP endpoint for inference.
+You can run the pipeline in two ways:
 
-Flow of Execution: Once everything is set up, the process will be as follows: you trigger a ZenML pipeline run from the client, the ZenML orchestrator builds Docker images for each step and runs them as containers (logging metadata back to the ZenML server). The training step, for example, might load data, train a model, save the model artifact to the artifact store, and log metrics to MLflow. When the pipeline completes, you can view the run in the ZenML dashboard (to see if it succeeded and inspect artifact URIs) and in the MLflow UI (to see detailed metrics and parameters logged). Then, using the model artifact, you launch the FastAPI container (either as part of a deployment pipeline or manually) to serve predictions. The architecture diagram (shown in the documentation) illustrates these components and interactions — the ZenML server and database sit at the center tracking everything, while pipeline workloads and MLflow run in your local infrastructure ￼. All data and compute remain on your machine (or network) since ZenML simply orchestrates existing tools rather than hosting the compute itself.
+### Option 1: Using Docker Compose
 
-(In summary, ZenML acts as the glue: the client and server manage coordination and metadata, and they leverage Docker, storage, and MLflow as the infrastructure for actual ML tasks. This modular design means you could swap out components — e.g., use a cloud artifact store or a Kubernetes orchestrator — without changing your pipeline code.)
+This approach uses the Docker Compose setup to run each component as a separate service:
 
-Running the Pipeline with Docker Compose
+```bash
+# Build and start all services
+docker-compose up --build
+```
 
-Now it’s time to execute the ML pipeline and the related services using Docker and Docker Compose. We will run the pipeline (training) and then the model serving container, verifying each component as we go. Make sure Docker is running and that you’ve saved any necessary code (pipeline code, FastAPI app code, etc.) from previous steps.
+This will:
+1. Start the ZenML server and MySQL database
+2. Run the data preprocessing service
+3. Run the model training service
+4. Start the inference API service
+5. Start Prometheus and Grafana for monitoring
 
-1. Build the Docker images for pipeline steps (if applicable): When using the local Docker orchestrator, ZenML will handle building Docker images for your pipeline steps automatically when you run the pipeline. It uses the base Python environment and integration requirements to containerize the steps. You generally do not need to manually call docker build for pipeline steps – ZenML does it under the hood. However, ensure that your pipeline code is accessible (typically in the current directory or installed as a package) so that ZenML can package it into the images. If you want to force a rebuild of images (for example, after changing code), you can run zenml pipeline run ... --build (or simply rerun the pipeline, as ZenML will detect changes). For transparency, ZenML will output logs during this process, indicating building of Docker images for each step and any package installation happening inside those images.
+### Option 2: Using ZenML Pipeline Runner
 
-2. Run the training pipeline: Execute your ZenML pipeline (e.g., via a Python script or notebook). For instance, if you have a pipeline defined in run_pipeline.py, run:
+This approach uses ZenML to orchestrate the pipeline:
 
+```bash
+# Run the ZenML pipeline
 python run_pipeline.py
+```
 
-This will trigger ZenML to: use the active stack (local_stack), build the step containers, and run each step in sequence. You’ll see logs in the console for each step starting and finishing, for example: “Using stack: local_stack (orchestrator: local_docker_orchestrator, artifact_store: local_store, experiment_tracker: mlflow_tracker)”, followed by messages like “Step trainer has started.” and “Step trainer has finished in X seconds.” ￼. ZenML streams these logs to the console for convenience. If the pipeline completes successfully, the trained model artifact will be saved in zenml_artifacts (for example, as a .pkl file or other format your step used) and any metrics will be logged to MLflow.
+ZenML will:
+1. Use the active stack (local_stack)
+2. Build Docker containers for each step
+3. Run each step in sequence
+4. Save artifacts and log metrics
 
-Verification: After the run, you can double-check:
-	•	The ZenML dashboard (refresh the web UI) should list a new Pipeline Run with status Completed (or Failed if something went wrong).
-	•	In the zenml_artifacts folder, you should find outputs from each step (structured by pipeline and step name).
-	•	The console logs provide quick feedback for each step’s execution ￼. If any step errored, ZenML would report it and mark the pipeline as failed.
+## 5. Testing the Inference API
 
-3. Build and run the FastAPI inference service: With the model artifact available, the next part is deploying the FastAPI app that uses this model for predictions. We assume you have a FastAPI application (e.g., in app.py or similar) that loads the model from the artifact store and exposes an endpoint (for example, /predict). To containerize and run this API:
-	•	Build the FastAPI Docker image: If you have a Dockerfile for the FastAPI app, you can integrate it into your docker-compose.yml or build it manually. For example, if your compose file has a service named model_api for this, run:
+Once the pipeline is complete and the inference service is running, you can test it:
 
-docker-compose build model_api
+```bash
+curl -X POST -H "Content-Type: application/json" \
+     -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}' \
+     http://localhost:8000/predict
+```
 
-This command builds the Docker image for the model_api service according to the Dockerfile ￼. Ensure the Dockerfile copies or has access to the model artifact (you might volume mount the zenml_artifacts directory or copy the artifact during build). If not using compose for build, you can do docker build -t model_api:latest . in the FastAPI app directory.
+You should receive a JSON response with the prediction result.
 
-	•	Start the FastAPI container: Once built, launch the container. If using compose, run:
+## 6. Monitoring and Metrics
 
-docker-compose up -d model_api
+Access the Prometheus UI to view metrics:
 
-This will start the FastAPI API container in detached mode ￼. The FastAPI server (Uvicorn) should start inside the container. You can verify it’s running by checking the container status: docker ps should show a container for model_api Up, and you can also inspect logs with docker logs <container_name> to see if Uvicorn reported “Started server at 0.0.0.0:”.
+```
+http://localhost:9090
+```
 
-	•	Confirm the API is reachable: If your FastAPI app is listening on a port (say 8000) and you mapped it in docker-compose (e.g., "8000:8000" in the service definition), you can test the endpoint in a browser or via curl. For instance, visiting http://localhost:8000/docs would show the interactive Swagger UI of the FastAPI app if configured, indicating the API is live.
+Access the Grafana dashboard for visualization:
 
-At this stage, all components of the MLOps pipeline are up and running as containers:
-	•	The ZenML server (with MySQL) is running and tracking metadata.
-	•	The MLflow tracking server (if configured to run separately) or at least the MLflow backend is ready for viewing results.
-	•	The pipeline’s training steps have executed in Docker (and those ephemeral containers have exited after completing tasks).
-	•	The FastAPI inference service is running in a container, ready to accept requests.
+```
+http://localhost:3000
+```
 
-We used Docker Compose for a coordinated setup. A quick way to see every container is docker-compose ps (which will list zenml server, mysql, model_api, etc., with their state and ports). You should see each expected service marked as “Up” (for persistent ones) or “Exit 0” (for one-off run containers that have completed).
+## 7. Model Retraining
 
-Using the FastAPI Inference API and Monitoring Results
+The MLOps pipeline supports two methods for model retraining:
 
-With the model deployed in the FastAPI container, you can now send data to the API and get predictions, and also inspect the various dashboards and logs:
+### Option 1: Using Docker Compose
 
-1. Calling the FastAPI endpoint for inference: To get a prediction from your model, send an HTTP request to the FastAPI app. Typically, you’ll use a POST request with JSON data. For example, if the API is expecting feature inputs in JSON format, you can use a tool like curl from the command line. Suppose our FastAPI has a /predict endpoint that accepts a JSON payload of features (the exact format depends on your model). A sample request might look like:
+To retrain the model using Docker Compose, run:
 
-curl -X 'POST' http://localhost:8000/predict \
-  -H 'Content-Type: application/json' \
-  -d '{"feature1": 5.1, "feature2": 3.5, "feature3": 1.4, "feature4": 0.2}'
+```bash
+# Restart just the training service
+docker-compose restart train-model
 
-In this example, we send a JSON with four features (imagine a model expecting Iris flower measurements). The -H 'Content-Type: application/json' header tells the API we’re sending JSON data. (In practice, replace the URL path and JSON body with what your API expects.) For instance, a generic example from a FastAPI tutorial shows adding a new record with JSON data using curl ￼ – the format above is analogous.
+# Or run it specifically
+docker-compose up train-model
+```
 
-If the request is successful, the FastAPI server will return a JSON response containing the prediction result(s). For example, it might respond with a JSON like: {"prediction": "[Iris-setosa]"} or {"result": 12.34} depending on how your endpoint is implemented. You should see this response printed in the terminal from the curl command.
+### Option 2: Using the API Endpoint
 
-(Tip: You can also use tools like Postman or the auto-generated Swagger UI (/docs) to test the API by manually inputting values and observing the output.)
+The inference service provides an API endpoint for triggering retraining:
 
-2. Checking the inference service logs: To ensure the request was processed correctly, you can look at the logs of the FastAPI container. Run:
+```bash
+# Trigger retraining via API
+curl -X POST http://localhost:8000/retrain
 
-docker logs <container_name_or_id>
+# The response will indicate that retraining has started
+# {"status":"retraining_started","message":"Model retraining has been started in the background. The new model will be used for predictions once training is complete."}
+```
 
-Replace <container_name_or_id> with the name/ID of the model API container (e.g., docker logs project_model_api_1 if Compose named it that). In the logs, you should see an entry corresponding to your POST request (Uvicorn logs will show the request path and a 200 status if all went well). Any errors in the prediction (stack traces, etc.) would also appear here, which is useful for debugging if the API didn’t return as expected.
+When you use the API endpoint, the inference service will:
+1. Restart the train-model container using Docker Compose
+2. Wait for the training to complete
+3. Automatically load the new model from MLflow
+4. Use the new model for future predictions
 
-3. Viewing metrics and experiment tracking: The training pipeline logged metadata to the ZenML server and metrics to MLflow:
-	•	ZenML Dashboard: Navigate to the ZenML dashboard in your browser (the one at localhost:8888). You should see your pipeline listed under “Pipeline Runs”. Clicking into it will show details like the step artifacts. You can trace which artifact (e.g., model file) was produced by which step, and see run metadata such as timings. This dashboard is useful for an overview of your pipeline executions and for sharing with team members (if the server is remote) ￼.
-	•	MLflow UI: To inspect the detailed experiment tracking, start the MLflow UI if it’s not already running. Since we didn’t explicitly start an MLflow tracking server as a persistent service in earlier steps, we can use the MLflow UI in local mode. Run the command:
+You can verify the model status using the health endpoint:
 
-mlflow ui
+```bash
+curl http://localhost:8000/health
+```
 
-(from within the virtual environment, in the directory where mlruns is located – likely your project root). This will launch a web UI at http://127.0.0.1:5000 by default ￼. Open that in a browser; you should see the MLflow interface. Under the “Experiments” section, find the experiment corresponding to your ZenML pipeline (by default, ZenML may log under an experiment named after the pipeline or “Default”). You will see one run entry for each pipeline run. Clicking on the run shows parameters (if logged) and metrics like accuracy, loss, etc., plotted over time or listed as values ￼ ￼. This rich UI lets you compare runs, visualize metrics, and even view artifacts or models if logged. (Since we logged metrics manually or via integration in our ZenML steps, those should appear here. If you used ZenML’s MLflow integration properly, it handles logging to MLflow under the hood.)
+## 8. Understanding the Components
 
-	•	Other dashboards: If you integrated any other tools (for example, if you had a model deployment tool or a monitoring system), now is the time to check those as well. In our setup, ZenML and MLflow are the main ones. ZenML doesn’t log training metrics itself; it delegates to MLflow for that ￼ ￼, so the MLflow UI is the primary place to evaluate model performance metrics in this pipeline.
+### Data Preprocessing
 
-4. Reviewing pipeline output and artifacts: You can also directly inspect the artifact store folder (zenml_artifacts). For example, open the directory to find the saved model file from training. This can be useful to manually verify the artifact (or even load it outside the pipeline to test). Because ZenML tracked this artifact, the ZenML UI or CLI (zenml artifact list) might show it with a UID, but the actual content is in the file in this folder.
+The data preprocessing script (`src/pipeline/data_preprocess.py`) loads the Iris dataset and saves it as a CSV file for further processing.
 
-5. (Optional) Iterate and re-run: With everything wired up, you can experiment by adjusting your pipeline (e.g., change a model hyperparameter or use a different dataset) and running it again. Each run will produce a new entry in ZenML/MLflow, which you can compare. The FastAPI service can be left running and pointed to a specific model artifact (you might need to update it if a new model should be served). In a production scenario, you might automate the deployment of a new model version to the FastAPI service when a new model is trained, but that’s beyond this tutorial’s scope.
+### Model Training
+
+The model training script (`src/pipeline/train_model.py`) loads the preprocessed data, trains a RandomForest classifier, and logs metrics and the model to MLflow.
+
+### Inference Service
+
+The FastAPI inference service (`src/services/inference/inference_service.py`) loads the trained model and exposes an endpoint for making predictions. It also includes Prometheus metrics for monitoring.
+
+## 9. Customizing the Pipeline
+
+To customize the pipeline for your own use case:
+
+1. Modify the data preprocessing script to load and preprocess your own data
+2. Update the model training script to use a different algorithm or hyperparameters
+3. Adjust the inference service to handle your specific input and output formats
+4. Update the Dockerfiles if you need additional dependencies
+
+## 10. Troubleshooting
+
+If you encounter issues:
+
+1. Check container logs: `docker-compose logs <service-name>`
+2. Verify that all services are running: `docker-compose ps`
+3. Ensure data directories exist and have proper permissions
+4. Check the health endpoint of the inference service: `curl http://localhost:8000/health`
+
+## 11. Shutting Down
+
+To stop all services:
+
+```bash
+docker-compose down
+```
+
+To stop only specific services:
+
+```bash
+docker-compose stop <service-name>
+```
+
+## Conclusion
+
+You now have a complete MLOps pipeline running locally with ZenML and Docker. This setup provides:
+
+- Version control for ML pipelines
+- Experiment tracking with MLflow
+- Containerized execution of pipeline steps
+- Model serving with FastAPI
+- Monitoring with Prometheus and Grafana
+
+This foundation can be extended to more complex use cases and eventually deployed to production environments.

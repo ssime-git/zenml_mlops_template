@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
@@ -7,6 +5,7 @@ services:
       - "3306:3306"
     environment:
       MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: zenml
     volumes:
       - ./data:/var/lib/mysql
     healthcheck:
@@ -17,6 +16,7 @@ services:
 
   zenml:
     image: zenmldocker/zenml-server
+    platform: linux/amd64
     ports:
       - "8888:8080"
     environment:
@@ -29,3 +29,78 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    ports:
+      - "5001:5000"
+    volumes:
+      - mlflow_data:/mlruns
+    command: >
+      mlflow server 
+      --host 0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  data-preprocess:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.preprocess
+    volumes:
+      - ./data-file:/app/data-file
+    depends_on:
+      - zenml
+      - mysql
+
+  train-model:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.train
+    volumes:
+      - ./data-file:/app/data-file
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      - data-preprocess
+      - mlflow
+
+  inference-api:
+    build:
+      context: .
+      dockerfile: dockerfiles/Dockerfile.inference
+    volumes:
+      - ./data-file:/app/data-file
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app/workspace
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    depends_on:
+      - mlflow
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - inference-api
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  mlflow_data:
+  mysql_data:
+  prometheus_data:
+  grafana_data:
