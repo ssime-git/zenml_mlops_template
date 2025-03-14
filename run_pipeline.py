@@ -52,7 +52,7 @@ def wait_for_service(url: str, max_retries: int = 30, retry_interval: int = 5):
 
 def login_to_zenml():
     """
-    Configure ZenML client with API key authentication.
+    Configure ZenML client with API key authentication for ZenML 0.75.0.
     """
     try:
         # Log environment variables for debugging
@@ -73,22 +73,44 @@ def login_to_zenml():
             logger.error("Missing required environment variables for ZenML authentication")
             return False
         
-        # Set environment variables for ZenML client
-        os.environ["ZENML_STORE_TYPE"] = "rest"
-        os.environ["ZENML_STORE_URL"] = server_url
-        os.environ["ZENML_STORE_API_KEY"] = api_key
+        # For ZenML 0.75.0, we'll use the Python API directly
+        # First, unset any conflicting environment variables
+        if "ZENML_STORE_URL" in os.environ:
+            del os.environ["ZENML_STORE_URL"]
+        if "ZENML_STORE_TYPE" in os.environ:
+            del os.environ["ZENML_STORE_TYPE"]
         
-        # Import ZenML client to test connection
+        # Import required ZenML modules
         from zenml.client import Client
         
-        # Initialize ZenML client to test connection
-        logger.info(f"Connecting to ZenML server at {server_url} with API key authentication")
-        client = Client()
+        # Set the environment variables directly
+        os.environ["ZENML_SERVER_URL"] = server_url
+        os.environ["ZENML_API_KEY"] = api_key
         
-        # Test connection by getting active stack
-        active_stack = client.active_stack.name
-        logger.info(f"Successfully connected to ZenML server. Active stack: {active_stack}")
-        return True
+        # Initialize the client
+        logger.info(f"Initializing ZenML client for server {server_url} with API key authentication")
+        client = Client()
+        logger.info("ZenML client initialized successfully")
+        
+        # Try to initialize the repository
+        try:
+            # Test if we can access the server
+            stacks = client.list_stacks()
+            logger.info(f"Successfully connected to ZenML server. Found {len(stacks)} stacks.")
+            
+            # If we have stacks, activate the first one
+            if stacks:
+                client.activate_stack(stacks[0].name)
+                logger.info(f"Activated stack: {stacks[0].name}")
+            else:
+                # No stacks available, we need to create one
+                logger.info("No stacks available. Setting up a new stack.")
+                return setup_zenml_stack()
+                
+            return True
+        except Exception as e:
+            logger.error(f"Failed to access ZenML server: {e}")
+            return False
     
     except Exception as e:
         logger.error(f"Error connecting to ZenML server: {e}")
@@ -211,15 +233,11 @@ def main():
             logger.error("Failed to login to ZenML server. Exiting.")
             sys.exit(1)
         
-        # Set up ZenML stack
-        if not setup_zenml_stack():
-            logger.error("Failed to set up ZenML stack. Exiting.")
-            sys.exit(1)
-        
         # Create and run the pipeline
         logger.info("Creating and running the pipeline...")
         pipeline = create_pipeline(preprocess_data, train_model)
-        pipeline.run()
+        # In ZenML 0.75.0, we call the pipeline function directly
+        pipeline()
         logger.info("Pipeline completed successfully!")
         
     except Exception as e:
