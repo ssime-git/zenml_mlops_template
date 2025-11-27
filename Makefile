@@ -7,12 +7,16 @@ help:
 	@echo "  make down      - Stop all services"
 	@echo "  make build     - Build all Docker images"
 	@echo "  make logs      - View logs from all services"
-	@echo "  make train     - Run the ML training pipeline"
-	@echo "  make retrain   - Trigger model retraining via API"
+	@echo "  make train     - Run the ML training pipeline (cached if unchanged)"
+	@echo "  make retrain   - Trigger model retraining via API (cached if unchanged)"
 	@echo "  make predict   - Make example prediction"
 	@echo "  make health    - Check API health"
 	@echo "  make clean     - Remove all containers, volumes, and data"
 	@echo "  make zenml CMD=\"...\" - Run ZenML CLI commands"
+	@echo ""
+	@echo "Note: ZenML caches pipeline steps. If inputs haven't changed, steps are skipped."
+	@echo "      Check logs with: docker compose logs inference-api --tail 20"
+	@echo "      Disable cache: set enable_cache=False in run_pipeline.py"
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make up && make train"
@@ -42,7 +46,13 @@ train:
 	docker compose --profile pipeline run --rm pipeline-runner
 
 retrain:
-	curl -X POST http://localhost:8000/retrain
+	@curl -X POST http://localhost:8000/retrain
+	@echo ""
+	@echo "Waiting for pipeline to complete (~20s)..."
+	@sleep 20
+	@echo ""
+	@echo "=== Pipeline Result ==="
+	@docker compose logs inference-api --tail 30 2>&1 | grep -E "(cached|All steps|Pipeline completed|promoted)" | tail -5 || echo "Check logs: docker compose logs inference-api --tail 30"
 
 # Inference commands
 predict:

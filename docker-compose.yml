@@ -45,7 +45,7 @@ services:
       "
 
   zenml:
-    image: zenmldocker/zenml-server:latest
+    image: zenmldocker/zenml-server:0.91.2
     platform: linux/amd64
     ports:
       - "8888:8080"

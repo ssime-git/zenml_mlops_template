@@ -613,5 +613,77 @@ This template is a starting point. Here are some ways to extend it:
 5. **Implement A/B testing** - Route traffic between production and challenger models
 
 
+## Moving Forward with ZenML
+
+ZenML offers additional features that you might consider as your ML platform matures:
+
+### Model Control Plane
+
+ZenML's [Model Control Plane](https://docs.zenml.io/concepts/models) provides a unified way to manage ML models across pipelines:
+
+```python
+from zenml import pipeline, Model
+
+@pipeline(
+    model=Model(
+        name="iris_classifier",
+        description="Iris flower classification model",
+        tags=["classification", "sklearn"]
+    )
+)
+def iris_pipeline():
+    # Pipeline steps...
+```
+
+**When to consider it:**
+- Multiple pipelines for the same ML use case (training, evaluation, deployment)
+- Need unified model versioning in ZenML dashboard
+- Team collaboration on model development
+
+**Current approach:** This template uses MLflow Model Registry directly, which provides similar functionality with production/challenger aliases.
+
+### MLflow Stack Integration
+
+ZenML can manage MLflow as a [stack component](https://docs.zenml.io/stack-components/model-registries/mlflow):
+
+```bash
+zenml integration install mlflow
+zenml experiment-tracker register mlflow_tracker --flavor=mlflow
+zenml model-registry register mlflow_registry --flavor=mlflow
+```
+
+**When to consider it:**
+- Consistent MLflow configuration across environments
+- MLflow experiments visible in ZenML's unified view
+- Automatic tracking without explicit MLflow calls
+
+**Current approach:** Direct MLflow integration in code - simpler and more explicit.
+
+### Pipeline Deployments
+
+ZenML can [deploy pipelines as HTTP services](https://docs.zenml.io/concepts/deployment):
+
+```bash
+zenml pipeline deploy my_module.my_pipeline --name my_deployment
+```
+
+**When to consider it:**
+- Deploy to cloud platforms (AWS App Runner, GCP Cloud Run)
+- Automatic scaling and container management
+- Inference logic tightly coupled to pipeline
+
+**Current approach:** Custom FastAPI service - more flexible, with Prometheus metrics, custom endpoints, and full control.
+
+### Why We Chose the Current Architecture
+
+| Feature | ZenML Native | Our Approach | Why |
+|---------|--------------|--------------|-----|
+| Model Registry | Model Control Plane | MLflow Registry | Production/challenger pattern, mature tooling |
+| Experiment Tracking | MLflow Stack Component | Direct MLflow | Simpler, explicit control |
+| Inference Service | Pipeline Deployments | Custom FastAPI | Prometheus metrics, custom endpoints, flexibility |
+| Artifact Store | Local/Cloud | MinIO (S3) | Dashboard visualization, cloud-ready |
+
+This architecture balances **simplicity** with **production-readiness**. As your needs grow, ZenML's additional features are there when you need them.
+
 
 *Built with ZenML, MLflow, FastAPI, and Docker*

@@ -7,7 +7,7 @@ from src.pipeline.data_preprocess import preprocess_data
 from src.pipeline.train_model import train_model
 
 
-@pipeline(name="iris_classification_pipeline")
+@pipeline(name="iris_classification_pipeline") # set enable_cache=False to disable caching (default: True)
 def iris_pipeline():
     """
     ZenML pipeline for Iris flower classification.
