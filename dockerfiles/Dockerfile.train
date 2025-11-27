@@ -1,6 +1,0 @@
-# Dockerfile.train
-FROM python:3.9-slim
-RUN pip install pandas scikit-learn mlflow joblib zenml
-COPY src/pipeline/train_model.py /app/train_model.py
-WORKDIR /app
-ENTRYPOINT ["python", "train_model.py"]

@@ -156,28 +156,40 @@ def retrain_model(background_tasks: BackgroundTasks):
 
 def _retrain_model_task():
     """
-    Background task to retrain the model.
+    Background task to retrain the model by triggering the pipeline-runner container.
     """
     try:
-        logger.info("Starting model retraining...")
+        logger.info("Starting model retraining via pipeline-runner...")
         
-        # Create a signal file to indicate retraining is requested
-        with open("/app/data-file/retrain_requested", "w") as f:
-            f.write(f"Retraining requested at {datetime.now().isoformat()}")
+        # Trigger the pipeline-runner container via docker compose
+        # Use -p to specify project name matching the existing containers
+        # Use --no-deps to avoid recreating dependent services
+        result = subprocess.run(
+            [
+                "docker", "compose",
+                "-p", "zenml_mlops_template",
+                "--profile", "pipeline",
+                "run", "--rm", "--no-deps", "pipeline-runner"
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/app/workspace",  # Mount point for the project
+            timeout=600  # 10 minute timeout
+        )
         
-        logger.info("Retraining signal file created")
-        logger.info("Waiting for training to complete before reloading model...")
+        if result.returncode == 0:
+            logger.info("Pipeline completed successfully")
+            logger.info(f"Output: {result.stdout[-500:] if len(result.stdout) > 500 else result.stdout}")
+        else:
+            logger.error(f"Pipeline failed with code {result.returncode}")
+            logger.error(f"Error: {result.stderr[-500:] if len(result.stderr) > 500 else result.stderr}")
         
-        # Give some time for the model to be trained and saved to MLflow
-        # In a production environment, you might want to implement a more robust
-        # solution that polls MLflow for new runs
-        import time
-        time.sleep(30)  # Wait 30 seconds for training to complete
-        
-        # Reload the model
+        # Reload the model after training
         load_model_from_mlflow()
         logger.info("Model reloaded after retraining")
         
+    except subprocess.TimeoutExpired:
+        logger.error("Pipeline timed out after 10 minutes")
     except Exception as e:
         logger.error(f"Error during model retraining: {str(e)}")
 

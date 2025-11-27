@@ -1,27 +1,66 @@
-install:
-	zenml integration install sklearn mlflow
+.PHONY: help up down build logs train retrain clean
 
-connect:
-	zenml connect --url http://localhost:8888 --username admin --password P@ssword123$
+help:
+	@echo "ZenML MLOps Template - Available commands:"
+	@echo ""
+	@echo "  make up        - Start all services (ZenML, MLflow, Inference API, Prometheus, Grafana)"
+	@echo "  make down      - Stop all services"
+	@echo "  make build     - Build all Docker images"
+	@echo "  make logs      - View logs from all services"
+	@echo "  make train     - Run the ML training pipeline"
+	@echo "  make retrain   - Trigger model retraining via API"
+	@echo "  make clean     - Remove all containers, volumes, and data"
+	@echo ""
+	@echo "Quick start:"
+	@echo "  make up && make train"
+	@echo ""
+	@echo "Service URLs:"
+	@echo "  - ZenML Dashboard: http://localhost:8888 (admin / zenml)"
+	@echo "  - MLflow UI:       http://localhost:5001"
+	@echo "  - Inference API:   http://localhost:8000"
+	@echo "  - Prometheus:      http://localhost:9092"
+	@echo "  - Grafana:         http://localhost:3002"
 
-init:
-	zenml init
+# Docker Compose commands
+up:
+	docker compose up -d
 
-register-local-store:
-	zenml artifact-store register local_store --flavor=local --path=./zenml_artifacts
+down:
+	docker compose down
 
-register-local-docker-orchestrator:
-	zenml orchestrator register local_docker_orchestrator --flavor=local_docker
+build:
+	docker compose build
 
-register-mlflow-experiment-tracker:
-	zenml experiment-tracker register mlflow_tracker --flavor=mlflow
+logs:
+	docker compose logs -f
 
-register-local-stack:
-	zenml stack register local_stack \
-    -o local_docker_orchestrator \
-    -a local_store \
-    -e mlflow_tracker \
-    --set
+# Training commands
+train:
+	docker compose --profile pipeline run --rm pipeline-runner
 
-describe-local-stack:
-	zenml stack describe local_stack
+retrain:
+	curl -X POST http://localhost:8000/retrain
+
+# Inference commands
+predict:
+	@echo "Example prediction request:"
+	curl -X POST http://localhost:8000/predict \
+		-H "Content-Type: application/json" \
+		-d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
+
+health:
+	curl http://localhost:8000/health
+
+# Cleanup
+# you might need to sudo remove data/ folder
+clean:
+	docker compose down -v
+	docker run --rm -v $(PWD)/data:/data alpine rm -rf /data/* 2>/dev/null || true
+	rm -rf ./data-file/*.csv .env
+
+# Local development (without Docker)
+install-local:
+	uv sync
+
+run-local:
+	python run_pipeline.py

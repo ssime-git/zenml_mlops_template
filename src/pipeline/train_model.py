@@ -4,9 +4,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 import mlflow
 import os
-from zenml.steps import step
+from zenml import step
 
-@step
+
+@step(name="train_model")
 def train_model(data_path: str) -> str:
     """
     ZenML step that trains a RandomForest model on the preprocessed data and logs metrics to MLflow.

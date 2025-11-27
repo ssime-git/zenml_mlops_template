@@ -1,0 +1,25 @@
+# Dockerfile.pipeline-runner
+# Single container that runs the full ZenML pipeline, properly orchestrated
+FROM python:3.12.7-slim
+
+WORKDIR /app
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install pinned dependencies
+COPY dockerfiles/requirements-pipeline-runner.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the entire src directory for proper imports
+COPY src/ /app/src/
+COPY run_pipeline.py /app/run_pipeline.py
+
+# Script to connect to ZenML server and run pipeline
+COPY scripts/run_zenml_pipeline.sh /app/run_zenml_pipeline.sh
+RUN chmod +x /app/run_zenml_pipeline.sh
+
+ENTRYPOINT ["/app/run_zenml_pipeline.sh"]

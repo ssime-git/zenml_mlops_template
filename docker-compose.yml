@@ -1,6 +1,6 @@
 services:
   mysql:
-    image: mysql:8.0
+    image: mysql:8.0.40
     ports:
       - "3306:3306"
     environment:
@@ -15,14 +15,14 @@ services:
       retries: 5
 
   zenml:
-    image: zenmldocker/zenml-server
+    image: zenmldocker/zenml-server:latest
     platform: linux/amd64
     ports:
       - "8888:8080"
     environment:
       ZENML_STORE_URL: mysql://root:password@mysql/zenml
       ZENML_DEFAULT_USER_NAME: admin
-      ZENML_DEFAULT_USER_PASSWORD: zenml
+      ZENML_DEFAULT_USER_PASSWORD: ${ZENML_PASSWORD:-zenml}
       ZENML_DEFAULT_USER_EMAIL: admin@zenml.io
       ZENML_AUTH_TYPE: default
       ZENML_STORE_TYPE: sql
@@ -31,7 +31,7 @@ services:
         condition: service_healthy
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
+    image: ghcr.io/mlflow/mlflow:v2.18.0
     ports:
       - "5001:5000"
     volumes:
@@ -40,32 +40,33 @@ services:
       mlflow server 
       --host 0.0.0.0
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/')"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  data-preprocess:
+  # ZenML pipeline runner - executes the full pipeline through ZenML orchestration
+  # Run with: docker compose --profile pipeline run --rm pipeline-runner
+  # 
+  # The pipeline-runner automatically creates a service account and API key
+  # using the admin credentials on first run.
+  pipeline-runner:
     build:
       context: .
-      dockerfile: dockerfiles/Dockerfile.preprocess
-    volumes:
-      - ./data-file:/app/data-file
-    depends_on:
-      - zenml
-      - mysql
-
-  train-model:
-    build:
-      context: .
-      dockerfile: dockerfiles/Dockerfile.train
+      dockerfile: dockerfiles/Dockerfile.pipeline-runner
     volumes:
       - ./data-file:/app/data-file
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      ZENML_STORE_URL: http://zenml:8080
+      # Admin credentials for auto-creating service account (must match zenml service)
+      ZENML_DEFAULT_USER_NAME: admin
+      ZENML_DEFAULT_USER_PASSWORD: ${ZENML_PASSWORD:-zenml}
     depends_on:
-      - data-preprocess
+      - zenml
       - mlflow
+    profiles:
+      - pipeline  # Only run when explicitly requested
 
   inference-api:
     build:
@@ -73,29 +74,36 @@ services:
       dockerfile: dockerfiles/Dockerfile.inference
     volumes:
       - ./data-file:/app/data-file
-      - /var/run/docker.sock:/var/run/docker.sock
-      - .:/app/workspace
+      - mlflow_data:/mlruns:ro  # Read-only access to MLflow artifacts
+      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for triggering pipeline
+      - .:/app/workspace:ro  # Project files for docker compose
     ports:
       - "8000:8000"
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
     depends_on:
-      - mlflow
+      mlflow:
+        condition: service_healthy
     restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.55.1
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "9092:9090"
     depends_on:
       - inference-api
 
   grafana:
-    image: grafana/grafana-oss:latest
+    image: grafana/grafana-oss:11.3.1
     ports:
-      - "3000:3000"
+      - "3002:3000"
     depends_on:
       - prometheus
 

@@ -3,9 +3,10 @@ from sklearn.datasets import load_iris
 import pandas as pd
 import os
 import numpy as np
-from zenml.steps import step
+from zenml import step
 
-@step
+
+@step(name="preprocess_data")
 def preprocess_data() -> str:
     """
     Preprocess the Iris dataset.
