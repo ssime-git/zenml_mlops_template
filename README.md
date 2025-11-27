@@ -1,423 +1,617 @@
 # ZenML MLOps Template
 
-A complete MLOps pipeline using ZenML, MLflow, FastAPI, and Docker.
+A production-ready MLOps pipeline demonstrating how to build, train, deploy, and monitor ML models using **ZenML**, **MLflow**, **FastAPI**, and **Docker**.
 
-## Why ZenML?
 
-While tools like **Airflow** and **Prefect** are excellent general-purpose workflow orchestrators, **ZenML** is purpose-built for ML pipelines:
 
-| Feature | ZenML | Airflow/Prefect |
-|---------|-------|-----------------|
-| **ML-First Design** | Built specifically for ML workflows with native artifact tracking, model versioning, and experiment management | General-purpose DAG orchestration requiring custom integrations |
-| **Artifact Lineage** | ✅ Automatic tracking of data, models, and metadata between pipeline steps (used in this project) | Manual implementation needed |
-| **MLflow Integration** | Native integration with MLflow for experiment tracking and model registry | Requires custom operators/tasks |
-| **Reproducibility** | Built-in versioning of pipelines, data, and models | Must be implemented manually |
-| **Stack Abstraction** | Swap infrastructure (local → cloud) without code changes | Tied to specific infrastructure |
-| **Minimal Boilerplate** | Simple `@step` and `@pipeline` decorators | More verbose DAG definitions |
+## Table of Contents
 
-### When to Use ZenML
+1. [Why This Project?](#why-this-project)
+2. [Why ZenML Over Airflow/Prefect?](#why-zenml-over-airflowprefect)
+3. [Architecture Overview](#architecture-overview)
+4. [Quick Start (5 Minutes)](#quick-start-5-minutes)
+5. [What Happens Under the Hood](#what-happens-under-the-hood)
+6. [Deep Dive: The Pipeline](#deep-dive-the-pipeline)
+7. [Deep Dive: Artifact Lineage](#deep-dive-artifact-lineage)
+8. [Deep Dive: Model Registry](#deep-dive-model-registry)
+9. [Deep Dive: Inference Service](#deep-dive-inference-service)
+10. [Monitoring & Observability](#monitoring--observability)
+11. [Service URLs & Credentials](#service-urls--credentials)
+12. [Commands Reference](#commands-reference)
+13. [Project Structure](#project-structure)
+14. [Troubleshooting](#troubleshooting)
 
-- ✅ ML model training and deployment pipelines
-- ✅ Experiment tracking and model versioning
-- ✅ Team collaboration on ML projects
-- ✅ Reproducible ML workflows
 
-### When Airflow/Prefect Might Be Better
 
-- ⚠️ Complex ETL workflows without ML components
-- ⚠️ Existing Airflow/Prefect infrastructure investment
-- ⚠️ Non-ML data engineering tasks
+## Why This Project?
 
-## Quick Start
+Building ML models is only 20% of the work. The other 80% is:
 
-```bash
-# 1. Start all services
-make up
+- **Tracking experiments** - Which hyperparameters produced the best model?
+- **Versioning data and models** - Can you reproduce last month's results?
+- **Deploying models** - How do you serve predictions at scale?
+- **Monitoring** - Is your model still performing well in production?
+- **Retraining** - How do you update models when performance degrades?
 
-# 2. Run the training pipeline (auto-creates service account)
-make train
+This template solves all of these challenges with a fully automated, containerized MLOps stack that you can run locally with a single command.
 
-# 3. Make a prediction
-make predict
 
-# 4. Trigger retraining via API
-make retrain
-```
 
-> **Note:** The pipeline-runner automatically creates a ZenML service account and API key on first run using the REST API. No manual setup required.
+## Why ZenML Over Airflow/Prefect?
 
-## Service URLs
+You might be wondering: *"Why not just use Airflow or Prefect?"*
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| ZenML Dashboard | http://localhost:8888 | admin / zenml |
-| MLflow UI | http://localhost:5001 | - |
-| Inference API | http://localhost:8000 | - |
-| Prometheus | http://localhost:9092 | - |
-| Grafana | http://localhost:3002 | admin / admin |
+Great question. Here's the honest answer:
 
-## Architecture
+### Airflow and Prefect are excellent... for general workflows
+
+They're battle-tested, widely adopted, and great for ETL pipelines, data engineering, and general task orchestration. But they weren't designed specifically for ML.
+
+### ZenML is purpose-built for ML pipelines
+
+| Capability | ZenML | Airflow/Prefect |
+|---|---|---|
+| **Artifact Tracking** | Automatic versioning of DataFrames, models, and any Python object | You build it yourself |
+| **Data Lineage** | See exactly which data produced which model | Manual implementation |
+| **MLflow Integration** | Native, first-class support | Custom operators needed |
+| **Experiment Comparison** | Built into the dashboard | External tools required |
+| **Infrastructure Abstraction** | Same code runs locally or on Kubernetes/cloud | Tied to specific infra |
+| **Boilerplate** | `@step` and `@pipeline` decorators | Verbose DAG definitions |
+
+### When to use what
+
+**Choose ZenML when:**
+- Building ML training and deployment pipelines
+- You need artifact versioning and lineage tracking
+- Team collaboration on ML experiments
+- You want MLflow integration out of the box
+
+**Choose Airflow/Prefect when:**
+- Complex ETL without ML components
+- You already have significant Airflow/Prefect investment
+- Pure data engineering workflows
+
+### The bottom line
+
+ZenML lets you focus on ML, not infrastructure plumbing. This project demonstrates that with a complete, working example.
+
+
+
+## Architecture Overview
 
 ```mermaid
 graph TD
-    subgraph "Infrastructure"
-        MySQL[(MySQL)] --> ZenML[ZenML Server]
-        MLflow[MLflow Tracking]
+    subgraph "Storage Layer"
+        MySQL[(MySQL<br/>ZenML Metadata)]
+        MinIO[(MinIO S3<br/>Artifact Store)]
+        MLflowDB[(MLflow<br/>Experiments)]
+    end
+    
+    subgraph "ZenML Platform"
+        ZenML[ZenML Server<br/>:8888]
+        ZenML --> MySQL
+        ZenML --> MinIO
     end
     
     subgraph "Pipeline Execution"
-        Runner[Pipeline Runner] -->|Register & Track| ZenML
-        Runner -->|Step 1| Preprocess[Data Preprocessing]
-        Preprocess -->|Step 2| Train[Model Training]
-        Train -->|Log Model| MLflow
+        Runner[Pipeline Runner]
+        Runner -->|1. Preprocess| Preprocess[preprocess_data]
+        Preprocess -->|Artifacts| MinIO
+        Preprocess -->|2. Train| Train[train_model]
+        Train -->|Log Metrics| MLflowDB
+        Train -->|Register Model| Registry[Model Registry]
+        Runner -->|Track Run| ZenML
     end
     
-    subgraph "Inference Service"
-        API[FastAPI] --> Predict["/predict"]
-        API --> Retrain["/retrain"]
-        API --> Health["/health"]
-        API -->|Load Model| MLflow
+    subgraph "Inference Layer"
+        API[FastAPI<br/>:8000]
+        API -->|Load Production Model| Registry
+        API -->|Expose| Endpoints["/predict<br/>/retrain<br/>/health<br/>/model/info"]
     end
     
     subgraph "Monitoring"
+        Prometheus[Prometheus<br/>:9092]
+        Grafana[Grafana<br/>:3002]
+        API -->|Metrics| Prometheus
         Prometheus --> Grafana
     end
     
-    Retrain -.->|Trigger| Runner
-    API -->|Metrics| Prometheus
-    
-    User([User]) -->|make train| Runner
-    User -->|API Calls| API
-    User -->|View Pipelines| ZenML
-    User -->|View Experiments| MLflow
-    User -->|View Metrics| Grafana
+    User([You]) -->|make train| Runner
+    User -->|API calls| API
+    User -->|View pipelines| ZenML
+    User -->|View experiments| MLflowDB
 ```
+
+### Components
+| Component | Purpose | Port |
+|---|---|---|
+| **ZenML Server** | Pipeline orchestration, artifact tracking, metadata storage | 8888 |
+| **MinIO** | S3-compatible artifact store (enables dashboard visualization) | 9000, 9001 |
+| **MySQL** | ZenML metadata database | 3306 |
+| **MLflow** | Experiment tracking and model registry | 5001 |
+| **FastAPI** | Model inference service | 8000 |
+| **Prometheus** | Metrics collection | 9092 |
+| **Grafana** | Metrics visualization | 3002 |
+
+
+
+## Quick Start (5 Minutes)
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Make (optional, but recommended)
+
+### Launch Everything
+
+```bash
+# Clone the repository
+git clone <repo-url>
+cd zenml_mlops_template
+
+# Start all services (takes ~30 seconds)
+make up
+
+# Run the training pipeline (takes ~20 seconds)
+make train
+
+# Make a prediction
+make predict
+```
+
+That's it. You now have a complete MLOps stack running locally.
+
+### Verify It's Working
+
+1. **ZenML Dashboard**: http://localhost:8888 (admin / zenml)
+   - See your pipeline run, artifacts, and lineage
+
+2. **MLflow UI**: http://localhost:5001
+   - View experiments, metrics, and registered models
+
+3. **Inference API**: http://localhost:8000/docs
+   - Interactive API documentation
+
+4. **Grafana**: http://localhost:3002 (admin / admin)
+   - Pre-configured monitoring dashboard
+
+
+
+## What Happens Under the Hood
+
+When you run `make train`, here's the complete sequence:
+
+### 1. Service Account Creation (Automatic)
+
+```
+Waiting for ZenML server...
+Server not activated. Activating with admin account...
+Creating service account 'pipeline-runner'...
+API key created successfully.
+```
+
+The pipeline runner automatically authenticates with ZenML using the REST API. No manual setup required.
+
+### 2. S3 Artifact Store Setup (Automatic)
+
+```
+Setting up S3 artifact store (MinIO)...
+Registering S3 artifact store...
+Registering S3 stack...
+Setting s3-stack as active...
+```
+
+A MinIO-backed artifact store is registered, enabling full artifact visualization in the dashboard.
+
+### 3. Pipeline Execution
+
+```
+Running ZenML pipeline...
+Using stack: s3-stack
+  orchestrator: default
+  artifact_store: s3-artifacts
+
+Step preprocess_data has started.
+[preprocess_data] Dataset loaded: 150 samples
+[preprocess_data] Train set: 120 samples
+[preprocess_data] Test set: 30 samples
+Step preprocess_data has finished in 4.7s.
+
+Step train_model has started.
+[train_model] Model accuracy: 1.0000
+[train_model] ✅ New model (v1) promoted to production!
+Step train_model has finished in 7.3s.
+
+Pipeline run has finished in 15.2s.
+```
+
+
+
+## Deep Dive: The Pipeline
+
+### Pipeline Definition (`run_pipeline.py`)
+
+```python
+from zenml import pipeline
+
+@pipeline(name="iris_classification_pipeline")
+def iris_pipeline():
+    # Artifacts flow automatically between steps
+    X_train, X_test, y_train, y_test = preprocess_data()
+    train_model(X_train=X_train, X_test=X_test, y_train=y_train, y_test=y_test)
+```
+
+That's the entire pipeline definition. ZenML handles:
+- Artifact serialization and versioning
+- Dependency resolution between steps
+- Metadata tracking
+- Execution orchestration
+
+### Step 1: Data Preprocessing (`src/pipeline/data_preprocess.py`)
+
+```python
+@step(name="preprocess_data")
+def preprocess_data() -> Tuple[
+    Annotated[pd.DataFrame, "X_train"],
+    Annotated[pd.DataFrame, "X_test"],
+    Annotated[pd.Series, "y_train"],
+    Annotated[pd.Series, "y_test"],
+]:
+    # Load and split data
+    iris = load_iris()
+    X_train, X_test, y_train, y_test = train_test_split(...)
+    
+    # Log metadata (visible in dashboard)
+    log_metadata(metadata={
+        "dataset_info": {"name": "Iris", "total_samples": 150},
+        "split_info": {"train_samples": 120, "test_samples": 30}
+    })
+    
+    return X_train, X_test, y_train, y_test
+```
+
+**Key Points:**
+- Return type annotations (`Annotated[pd.DataFrame, "X_train"]`) name the artifacts
+- `log_metadata()` attaches custom metadata visible in the dashboard
+- DataFrames are automatically serialized and versioned
+
+### Step 2: Model Training (`src/pipeline/train_model.py`)
+
+```python
+@step(name="train_model")
+def train_model(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Annotated[str, "model_uri"]:
+    # Train model
+    model = RandomForestClassifier(n_estimators=50)
+    model.fit(X_train, y_train)
+    accuracy = model.score(X_test, y_test)
+    
+    # Log to MLflow
+    with mlflow.start_run():
+        mlflow.log_metric("accuracy", accuracy)
+        mlflow.sklearn.log_model(model, "model")
+    
+    # Conditional promotion to production
+    if accuracy > production_accuracy:
+        # Promote to production
+    else:
+        # Mark as challenger
+    
+    # Log metadata
+    log_metadata(metadata={
+        "model_metrics": {"accuracy": accuracy},
+        "mlflow_info": {"run_id": run_id, "promoted": promoted}
+    })
+    
+    return model_uri
+```
+
+**Key Points:**
+- Receives artifacts from the previous step with full lineage
+- Integrates with MLflow for experiment tracking
+- Implements conditional model promotion logic
+- Logs rich metadata for dashboard visualization
+
+
+
+## Deep Dive: Artifact Lineage
+
+One of ZenML's killer features is **automatic artifact lineage tracking**.
+
+### What Gets Tracked
+
+Every artifact (DataFrame, model, etc.) is:
+- **Versioned** with a unique ID
+- **Stored** in the artifact store (MinIO)
+- **Linked** to the step that produced it
+- **Connected** to downstream consumers
+
+### Viewing Lineage in the Dashboard
+
+1. Go to http://localhost:8888
+2. Navigate to **Pipelines** → **iris_classification_pipeline**
+3. Click on a run
+4. View the **DAG** to see data flow
+5. Click on any artifact to see its metadata and lineage
+
+### Why This Matters
+
+- **Reproducibility**: Know exactly which data produced which model
+- **Debugging**: Trace issues back to their source
+- **Compliance**: Audit trail for regulated industries
+- **Collaboration**: Team members understand data dependencies
+
+
+
+## Deep Dive: Model Registry
+
+### The Problem
+
+Without a model registry, you end up with:
+- `model_v1_final.pkl`
+- `model_v1_final_FINAL.pkl`
+- `model_v1_final_FINAL_actually_final.pkl`
+
+### The Solution: MLflow Model Registry
+
+This project uses MLflow's Model Registry with a **production/challenger** pattern:
+
+| Alias | Purpose |
+|-||
+| `production` | The model currently serving predictions |
+| `challenger` | New models that didn't beat production |
+
+### Promotion Logic
+
+```python
+if new_accuracy > production_accuracy:
+    # Promote to production
+    client.set_registered_model_alias(MODEL_NAME, "production", version)
+    print(f"✅ New model (v{version}) promoted to production!")
+else:
+    # Mark as challenger
+    client.set_registered_model_alias(MODEL_NAME, "challenger", version)
+    print(f"❌ New model (v{version}) NOT promoted. Keeping current production.")
+```
+
+### Viewing the Registry
+
+- **MLflow UI**: http://localhost:5001/#/models
+- **API Endpoint**: `curl http://localhost:8000/model/info`
+
+
+
+## Deep Dive: Inference Service
+
+### FastAPI Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/health` | GET | Health check with model info |
+| `/predict` | POST | Make predictions |
+| `/retrain` | POST | Trigger model retraining |
+| `/model/info` | GET | Detailed production model info |
+| `/metrics` | GET | Prometheus metrics |
+
+### Making Predictions
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
+
+# Response: {"prediction": 0}
+```
+
+### Triggering Retraining
+
+```bash
+curl -X POST http://localhost:8000/retrain
+
+# Response: {"status": "retraining_started", "message": "..."}
+```
+
+This triggers the full pipeline in the background:
+1. Preprocess data
+2. Train new model
+3. Compare with production
+4. Promote if better
+
+### Model Loading
+
+The inference service loads the **production** model from MLflow:
+
+```python
+model = mlflow.sklearn.load_model(f"models:/{MODEL_NAME}@production")
+```
+
+When a new model is promoted, the service automatically picks it up on the next request.
+
+
+
+## Monitoring & Observability
+
+### Prometheus Metrics
+
+The inference service exposes:
+- `prediction_requests_total` - Total predictions made
+- `model_retrain_total` - Total retrain triggers
+
+### Grafana Dashboard
+
+A pre-configured dashboard is available at http://localhost:3002/d/mlops-inference
+
+![Grafana Dashboard](./assets/grafana_dashboard.png)
+
+**Panels:**
+- Total Predictions counter
+- Total Model Retrains counter
+- API Status indicator
+- Request Rate graph
+- Retrain Events timeline
+
+### ZenML Dashboard
+
+http://localhost:8888 provides:
+- Pipeline run history
+- Step-level logs and metadata
+- Artifact lineage visualization
+- Stack configuration
+
+### MLflow UI
+
+http://localhost:5001 provides:
+- Experiment tracking
+- Metric comparison
+- Model registry
+- Artifact browser
+
+
+
+## Service URLs & Credentials
+
+| Service | URL | Credentials |
+||--|-|
+| ZenML Dashboard | http://localhost:8888 | admin / zenml |
+| MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
+| MLflow UI | http://localhost:5001 | - |
+| Inference API | http://localhost:8000 | - |
+| API Docs | http://localhost:8000/docs | - |
+| Prometheus | http://localhost:9092 | - |
+| Grafana | http://localhost:3002 | admin / admin |
+
+
+
+## Commands Reference
+
+### Essential Commands
+
+```bash
+make up        # Start all services
+make train     # Run training pipeline
+make predict   # Make example prediction
+make down      # Stop all services
+make clean     # Remove everything (including data)
+```
+
+### ZenML CLI (via Docker)
+
+```bash
+make zenml CMD="pipeline list"       # List pipelines
+make zenml CMD="pipeline runs list"  # List runs
+make zenml CMD="artifact list"       # List artifacts
+make zenml CMD="stack describe"      # Show current stack
+```
+
+### Docker Compose
+
+```bash
+docker compose up -d                                    # Start services
+docker compose --profile pipeline run --rm pipeline-runner  # Run pipeline
+docker compose logs -f zenml                            # View ZenML logs
+docker compose down -v                                  # Stop and remove volumes
+```
+
+
 
 ## Project Structure
 
 ```
 zenml_mlops_template/
-├── config/                         # Configuration files
-│   └── prometheus.yml
-├── docs/
-│   └── tutorial.ipynb              # Interactive tutorial notebook
-├── dockerfiles/                    # Docker build files
-│   ├── Dockerfile.inference
-│   ├── Dockerfile.pipeline-runner
-│   ├── requirements-*.txt          # Pinned dependencies
+├── config/
+│   ├── prometheus.yml                 # Prometheus scrape config
+│   └── grafana/                       # Grafana provisioning
+│       ├── provisioning/
+│       │   ├── datasources/           # Auto-configured Prometheus
+│       │   └── dashboards/            # Dashboard provisioning
+│       └── dashboards/
+│           └── mlops-dashboard.json   # Pre-built dashboard
+├── dockerfiles/
+│   ├── Dockerfile.inference           # FastAPI service
+│   ├── Dockerfile.pipeline-runner     # ZenML pipeline executor
+│   └── requirements-*.txt             # Pinned dependencies
 ├── scripts/
-│   └── run_zenml_pipeline.sh       # Pipeline runner script
+│   ├── run_zenml_pipeline.sh          # Pipeline entrypoint (handles auth)
+│   └── zenml_cli.sh                   # CLI wrapper with auth
 ├── src/
 │   ├── pipeline/
-│   │   ├── data_preprocess.py      # Data preprocessing step
-│   │   └── train_model.py          # Model training step
+│   │   ├── data_preprocess.py         # Step 1: Data preprocessing
+│   │   └── train_model.py             # Step 2: Model training
 │   └── services/
 │       └── inference/
-│           └── inference_service.py # FastAPI service
-├── docker-compose.yml
-├── Makefile
-├── pyproject.toml
-└── run_pipeline.py                 # ZenML pipeline definition
+│           └── inference_service.py   # FastAPI inference service
+├── docker-compose.yml                 # Service definitions
+├── Makefile                           # Command shortcuts
+├── run_pipeline.py                    # ZenML pipeline definition
+└── pyproject.toml                     # Python dependencies
 ```
 
-## Tutorial
 
-For an interactive walkthrough, open the Jupyter notebook:
-
-```bash
-jupyter notebook docs/tutorial.ipynb
-```
-
-The notebook demonstrates all make commands with example outputs.
-
-## Commands
-
-### Makefile Commands
-
-```bash
-make help      # Show all available commands
-make up        # Start all services
-make down      # Stop all services
-make build     # Build Docker images
-make logs      # View service logs
-make train     # Run training pipeline
-make retrain   # Trigger retraining via API
-make predict   # Make example prediction
-make health    # Check API health
-make clean     # Remove containers and data
-```
-![alt text](./assets/zenml_pipeline.png)
-
-### Docker Compose Commands
-
-```bash
-# Start infrastructure only
-docker compose up -d
-
-# Run training pipeline (on-demand)
-docker compose --profile pipeline run --rm pipeline-runner
-
-# View logs
-docker compose logs -f <service-name>
-
-# Stop everything
-docker compose down -v
-```
-
-### ZenML Dashboard
-
-The ZenML Dashboard provides a visual interface for exploring pipelines, runs, and artifacts:
-
-```
-http://localhost:8888
-Login: admin / zenml
-```
-
-**Dashboard Features:**
-- **Pipelines** - View all registered pipelines
-- **Runs** - Browse pipeline execution history
-- **Artifacts** - Explore versioned data and models with lineage
-- **DAG View** - Visualize pipeline structure and data flow
-- **Stacks** - Manage infrastructure configurations
-
-### ZenML CLI
-
-Run ZenML CLI commands via Docker:
-
-```bash
-# List pipelines
-make zenml CMD="pipeline list"
-
-# List pipeline runs
-make zenml CMD="pipeline runs list"
-
-# List artifacts (with lineage)
-make zenml CMD="artifact list"
-
-# Show current stack
-make zenml CMD="stack describe"
-
-# Get help
-make zenml CMD="--help"
-```
-
-## API Endpoints
-
-### Health Check
-```bash
-curl http://localhost:8000/health
-```
-
-### Prediction
-```bash
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
-```
-
-Response:
-```json
-{"prediction": 0}
-```
-
-### Model Info
-```bash
-curl http://localhost:8000/model/info
-```
-
-Response:
-```json
-{
-  "model_name": "iris-classifier",
-  "production_version": "1",
-  "run_id": "a93d65c7b1f845559ac9e34c4fc1fd33",
-  "metrics": {"accuracy": 1.0},
-  "parameters": {"n_estimators": "50"},
-  "total_versions": 2,
-  "aliases": {"production": "1", "challenger": "2"}
-}
-```
-
-### Trigger Retraining
-```bash
-curl -X POST http://localhost:8000/retrain
-```
-
-Response:
-```json
-{
-  "status": "retraining_started",
-  "message": "Model retraining has been started in the background..."
-}
-```
-
-### Prometheus Metrics
-```bash
-curl http://localhost:8000/metrics
-```
-
-## Training Pipeline
-
-The pipeline consists of two ZenML steps with **full artifact lineage**:
-
-1. **preprocess_data**: Loads Iris dataset, splits into train/test sets
-   - Outputs: `X_train`, `X_test`, `y_train`, `y_test` (versioned DataFrames)
-2. **train_model**: Trains RandomForest classifier, registers in MLflow Model Registry
-   - Inputs: Receives artifacts from step 1 with full lineage tracking
-   - Outputs: `model_uri` with metadata (accuracy, promotion status)
-
-### Artifact Lineage
-
-ZenML automatically tracks all artifacts passed between steps. View the lineage in the ZenML Dashboard:
-
-```
-http://localhost:8888 → Pipelines → iris_classification_pipeline → Select Run → DAG View
-```
-
-Each artifact shows:
-- **Version**: Unique ID for reproducibility
-- **Metadata**: Shape, dtype, custom metrics
-- **Lineage**: Which step produced it, which steps consumed it
-
-### Model Registry
-
-The pipeline uses **MLflow Model Registry** for model versioning and promotion:
-
-- **Model Name**: `iris-classifier`
-- **Aliases**: 
-  - `production` - Current best model serving predictions
-  - `challenger` - New models that didn't beat production
-
-**Promotion Logic**: New models are only promoted to production if their accuracy **exceeds** the current production model's accuracy.
-
-```sh
-# Example output from training:
-[train_model] Current production model (v1) accuracy: 1.0000
-[train_model] Model accuracy: 0.9800
-[train_model] ❌ New model (v2) NOT promoted. Accuracy: 0.9800 <= 1.0000
-```
-
-### Run Training
-
-```bash
-# Via Docker (recommended)
-make train
-
-# Or directly
-docker compose --profile pipeline run --rm pipeline-runner
-```
-
-### Retraining Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant API as Inference API
-    participant Runner as Pipeline Runner
-    participant Registry as MLflow Registry
-    
-    User->>API: POST /retrain
-    API-->>User: {"status": "retraining_started"}
-    API->>Runner: docker compose run pipeline-runner
-    Runner->>Runner: Preprocess data
-    Runner->>Runner: Train model
-    Runner->>Registry: Get production model accuracy
-    Runner->>Registry: Register new model version
-    alt New accuracy > Production accuracy
-        Runner->>Registry: Promote to production
-        API->>Registry: Load new production model
-    else New accuracy <= Production accuracy
-        Runner->>Registry: Mark as challenger
-        Note over API: Keep using current model
-    end
-```
-
-## Monitoring
-
-### MLflow
-- View experiments: http://localhost:5001
-- **Model Registry**: http://localhost:5001/#/models
-- Track metrics, parameters, and model artifacts
-- View registered models and their versions (production vs challenger)
-
-### Prometheus
-- View metrics: http://localhost:9092
-- Query `prediction_requests_total` for prediction count
-- Query `model_retrain_total` for retrain count
-
-### Grafana
-![alt text](./assets/grafana_dashboard.png)
-- Dashboard: http://localhost:3002/d/mlops-inference
-- Login: admin / admin
-- **Pre-configured**: Prometheus datasource and MLOps dashboard are auto-provisioned
-
-The MLOps Inference Dashboard includes:
-- Total Predictions counter
-- Total Model Retrains counter
-- API Status indicator
-- Prediction Request Rate graph
-- Model Retrain Events timeline
-- Cumulative Metrics Over Time
-
-## Local Development
-
-```bash
-# Install dependencies
-uv sync
-
-# Run pipeline locally
-python run_pipeline.py
-```
 
 ## Troubleshooting
 
+### Services won't start
+
 ```bash
-# Check service status
+# Check what's running
 docker compose ps
 
 # View logs
 docker compose logs zenml
 docker compose logs mlflow
-docker compose logs inference-api
-
-# Restart a service
-docker compose restart <service-name>
 
 # Full reset
 make clean
 make up
-make train
 ```
 
-## Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| ZENML_PASSWORD | zenml | ZenML admin password |
-| MLFLOW_TRACKING_URI | http://mlflow:5000 | MLflow server URL |
-| ZENML_STORE_URL | http://zenml:8080 | ZenML server URL |
-
-### Custom Password
-
-To use a custom ZenML admin password, create a `.env` file:
+### Pipeline fails
 
 ```bash
-ZENML_PASSWORD=your_secure_password
+# Check pipeline-runner logs
+docker compose --profile pipeline logs pipeline-runner
+
+# Verify ZenML server is healthy
+curl http://localhost:8888/health
 ```
 
-### Automatic Setup
+### Can't see artifacts in dashboard
 
-On first run, `make train` automatically:
+Make sure you're using the S3 stack (MinIO). The local artifact store doesn't support dashboard visualization.
 
-1. **Activates ZenML server** - Creates admin user via `PUT /api/v1/activate`
-2. **Creates service account** - `pipeline-runner` for non-interactive auth
-3. **Generates API key** - For secure pipeline execution
-4. **Runs the pipeline** - Executes preprocessing and training steps
+```bash
+# Check current stack
+make zenml CMD="stack describe"
 
-No manual configuration required.
+# Should show: artifact_store: s3-artifacts
+```
 
-### Pinned Versions
+### Model not loading in inference service
 
-All dependencies are pinned in `dockerfiles/requirements-*.txt` and `pyproject.toml` for reproducibility.
+```bash
+# Check if model is registered
+curl http://localhost:8000/model/info
+
+# Check MLflow registry
+open http://localhost:5001/#/models
+```
+
+
+
+## What's Next?
+
+This template is a starting point. Here are some ways to extend it:
+
+1. **Add more steps** - Feature engineering, data validation, model evaluation
+2. **Use a different model** - Swap RandomForest for XGBoost, neural networks, etc.
+3. **Deploy to cloud** - ZenML supports AWS, GCP, Azure with minimal code changes
+4. **Add CI/CD** - Trigger pipelines from GitHub Actions
+5. **Implement A/B testing** - Route traffic between production and challenger models
+
+
+
+*Built with ZenML, MLflow, FastAPI, and Docker*
