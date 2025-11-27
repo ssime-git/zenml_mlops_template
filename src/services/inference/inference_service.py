@@ -37,27 +37,41 @@ retrain_count = Counter("model_retrain_total", "Total model retrain requests")
 metrics_app = make_asgi_app()
 app.mount("/metrics", metrics_app)
 
+# Model Registry configuration
+MODEL_NAME = "iris-classifier"
+
 # Global variable for model
 model = None
+current_model_version = None
 
 def load_model_from_mlflow():
     """
-    Load the model from MLflow. If no model is found, return None.
+    Load the production model from MLflow Model Registry.
+    Falls back to latest run if no production model is registered.
     """
-    global model
+    global model, current_model_version
+    client = mlflow.tracking.MlflowClient()
+    
     try:
-        # Set the experiment
+        # Try to load from Model Registry (production alias)
+        model_version = client.get_model_version_by_alias(MODEL_NAME, "production")
+        model_uri = f"models:/{MODEL_NAME}@production"
+        model = mlflow.sklearn.load_model(model_uri)
+        current_model_version = model_version.version
+        logger.info(f"Loaded production model from registry: {MODEL_NAME} v{model_version.version}")
+        return True
+    except mlflow.exceptions.MlflowException as e:
+        logger.warning(f"No production model in registry, trying latest run: {e}")
+    
+    # Fallback: Load from latest experiment run (for backward compatibility)
+    try:
         experiment_name = "iris_classification"
         mlflow.set_experiment(experiment_name)
-        
-        # Get the latest model from the experiment
-        client = mlflow.tracking.MlflowClient()
         experiment = client.get_experiment_by_name(experiment_name)
         
         if experiment:
-            experiment_id = experiment.experiment_id
             runs = client.search_runs(
-                experiment_ids=[experiment_id],
+                experiment_ids=[experiment.experiment_id],
                 order_by=["attributes.start_time DESC"],
                 max_results=1
             )
@@ -65,14 +79,12 @@ def load_model_from_mlflow():
             if runs:
                 run_id = runs[0].info.run_id
                 model = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
+                current_model_version = f"run:{run_id[:8]}"
                 logger.info(f"Loaded model from MLflow run: {run_id}")
                 return True
-            else:
-                logger.warning(f"No runs found in experiment {experiment_name}")
-                return False
-        else:
-            logger.warning(f"Experiment {experiment_name} not found")
-            return False
+        
+        logger.warning("No model found in MLflow")
+        return False
     except Exception as e:
         logger.error(f"Error loading model from MLflow: {str(e)}")
         return False
@@ -120,10 +132,10 @@ def health():
     Health check endpoint.
     
     Returns:
-        dict: Status message
+        dict: Status message including model version
     """
     # Check if model is loaded or can be loaded
-    global model
+    global model, current_model_version
     if model is None:
         model_available = load_model_from_mlflow()
     else:
@@ -132,8 +144,58 @@ def health():
     return {
         "status": "healthy",
         "model_loaded": model is not None,
-        "model_available": model_available
+        "model_available": model_available,
+        "model_version": current_model_version,
+        "model_name": MODEL_NAME
     }
+
+@app.get("/model/info")
+def model_info():
+    """
+    Get detailed information about the current production model.
+    
+    Returns:
+        dict: Model metadata from MLflow Model Registry
+    """
+    client = mlflow.tracking.MlflowClient()
+    
+    try:
+        # Get production model version from registry
+        model_version = client.get_model_version_by_alias(MODEL_NAME, "production")
+        run = client.get_run(model_version.run_id)
+        
+        # Get all versions for this model
+        all_versions = client.search_model_versions(f"name='{MODEL_NAME}'")
+        
+        return {
+            "model_name": MODEL_NAME,
+            "production_version": model_version.version,
+            "run_id": model_version.run_id,
+            "created_at": model_version.creation_timestamp,
+            "description": model_version.description,
+            "metrics": {
+                "accuracy": run.data.metrics.get("accuracy"),
+            },
+            "parameters": {
+                "n_estimators": run.data.params.get("n_estimators"),
+            },
+            "total_versions": len(all_versions),
+            "aliases": {
+                "production": model_version.version,
+                "challenger": next(
+                    (v.version for v in all_versions 
+                     if "challenger" in (v.aliases or [])), 
+                    None
+                )
+            }
+        }
+    except mlflow.exceptions.MlflowException as e:
+        return {
+            "model_name": MODEL_NAME,
+            "production_version": None,
+            "error": f"No production model registered: {str(e)}",
+            "total_versions": 0
+        }
 
 @app.post("/retrain")
 def retrain_model(background_tasks: BackgroundTasks):

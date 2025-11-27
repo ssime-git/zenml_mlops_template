@@ -156,6 +156,24 @@ Response:
 {"prediction": 0}
 ```
 
+### Model Info
+```bash
+curl http://localhost:8000/model/info
+```
+
+Response:
+```json
+{
+  "model_name": "iris-classifier",
+  "production_version": "1",
+  "run_id": "a93d65c7b1f845559ac9e34c4fc1fd33",
+  "metrics": {"accuracy": 1.0},
+  "parameters": {"n_estimators": "50"},
+  "total_versions": 2,
+  "aliases": {"production": "1", "challenger": "2"}
+}
+```
+
 ### Trigger Retraining
 ```bash
 curl -X POST http://localhost:8000/retrain
@@ -179,7 +197,25 @@ curl http://localhost:8000/metrics
 The pipeline consists of two ZenML steps:
 
 1. **preprocess_data**: Loads the Iris dataset and saves preprocessed CSV
-2. **train_model**: Trains RandomForest classifier and logs to MLflow
+2. **train_model**: Trains RandomForest classifier, registers in MLflow Model Registry
+
+### Model Registry
+
+The pipeline uses **MLflow Model Registry** for model versioning and promotion:
+
+- **Model Name**: `iris-classifier`
+- **Aliases**: 
+  - `production` - Current best model serving predictions
+  - `challenger` - New models that didn't beat production
+
+**Promotion Logic**: New models are only promoted to production if their accuracy **exceeds** the current production model's accuracy.
+
+```sh
+# Example output from training:
+[train_model] Current production model (v1) accuracy: 1.0000
+[train_model] Model accuracy: 0.9800
+[train_model] ❌ New model (v2) NOT promoted. Accuracy: 0.9800 <= 1.0000
+```
 
 ### Run Training
 
@@ -198,22 +234,31 @@ sequenceDiagram
     participant User
     participant API as Inference API
     participant Runner as Pipeline Runner
-    participant MLflow
+    participant Registry as MLflow Registry
     
     User->>API: POST /retrain
     API-->>User: {"status": "retraining_started"}
     API->>Runner: docker compose run pipeline-runner
     Runner->>Runner: Preprocess data
     Runner->>Runner: Train model
-    Runner->>MLflow: Log model & metrics
-    API->>MLflow: Reload latest model
+    Runner->>Registry: Get production model accuracy
+    Runner->>Registry: Register new model version
+    alt New accuracy > Production accuracy
+        Runner->>Registry: Promote to production
+        API->>Registry: Load new production model
+    else New accuracy <= Production accuracy
+        Runner->>Registry: Mark as challenger
+        Note over API: Keep using current model
+    end
 ```
 
 ## Monitoring
 
 ### MLflow
 - View experiments: http://localhost:5001
+- **Model Registry**: http://localhost:5001/#/models
 - Track metrics, parameters, and model artifacts
+- View registered models and their versions (production vs challenger)
 
 ### Prometheus
 - View metrics: http://localhost:9092
