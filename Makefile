@@ -1,4 +1,4 @@
-.PHONY: help up down build logs train retrain clean
+.PHONY: help up down build logs train retrain clean public private
 
 help:
 	@echo "ZenML MLOps Template - Available commands:"
@@ -64,3 +64,10 @@ install-local:
 
 run-local:
 	python run_pipeline.py
+
+# GitHub repository visibility
+public:
+	gh repo edit --visibility public --accept-visibility-change-consequences
+
+private:
+	gh repo edit --visibility private --accept-visibility-change-consequences
