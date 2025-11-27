@@ -137,6 +137,12 @@ graph TD
 
 ## Quick Start (5 Minutes)
 
+### Demo Video
+
+Watch the full demo of this MLOps template in action:
+
+[![Demo Video](https://img.shields.io/badge/Watch-Demo%20Video-blue?style=for-the-badge&logo=zoom)](https://us02web.zoom.us/clips/share/q0yjBNlwSLukbmncGEoJ1A)
+
 ### Prerequisites
 
 - Docker and Docker Compose
