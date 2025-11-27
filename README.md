@@ -141,7 +141,7 @@ graph TD
 
 Watch the full demo of this MLOps template in action:
 
-[![Demo Video](https://img.shields.io/badge/Watch-Demo%20Video-blue?style=for-the-badge&logo=zoom)](https://us02web.zoom.us/clips/share/q0yjBNlwSLukbmncGEoJ1A)
+<div><a href="https://us02web.zoom.us/clips/share/q0yjBNlwSLukbmncGEoJ1A"><p>MLOps with ZenML</p></a><a href="https://us02web.zoom.us/clips/share/q0yjBNlwSLukbmncGEoJ1A"><img style="max-width: 300px; border-radius: 10px;" src="https://file.zoom.us/public/file/bbIbD5LdRPKMqiHz7IDavw/MS4zLiVdp6HRPG02qpMYMrzstiGrzLunPOBrHFdw3cJ7lnSB/r0Gjw_nZSrmCfGmiHgyOag.gif" /></a></div>
 
 ### Prerequisites
 
