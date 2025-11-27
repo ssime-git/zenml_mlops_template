@@ -34,24 +34,37 @@ make retrain
 
 ```mermaid
 graph TD
-    subgraph "Training Pipeline"
-        A[Data Preprocessing] --> B[Model Training]
-        B --> C[MLflow]
+    subgraph "Infrastructure"
+        MySQL[(MySQL)] --> ZenML[ZenML Server]
+        MLflow[MLflow Tracking]
+    end
+    
+    subgraph "Pipeline Execution"
+        Runner[Pipeline Runner] -->|Register & Track| ZenML
+        Runner -->|Step 1| Preprocess[Data Preprocessing]
+        Preprocess -->|Step 2| Train[Model Training]
+        Train -->|Log Model| MLflow
     end
     
     subgraph "Inference Service"
-        D[FastAPI] --> E["/predict"]
-        D --> F["/retrain"]
-        D --> G["/health"]
+        API[FastAPI] --> Predict["/predict"]
+        API --> Retrain["/retrain"]
+        API --> Health["/health"]
+        API -->|Load Model| MLflow
     end
     
     subgraph "Monitoring"
-        H[Prometheus] --> I[Grafana]
+        Prometheus --> Grafana
     end
     
-    C -.->|Load Model| D
-    F -.->|Trigger| A
-    D -.->|Metrics| H
+    Retrain -.->|Trigger| Runner
+    API -->|Metrics| Prometheus
+    
+    User([User]) -->|make train| Runner
+    User -->|API Calls| API
+    User -->|View Pipelines| ZenML
+    User -->|View Experiments| MLflow
+    User -->|View Metrics| Grafana
 ```
 
 ## Project Structure
@@ -208,9 +221,18 @@ sequenceDiagram
 - Query `model_retrain_total` for retrain count
 
 ### Grafana
-- Dashboard: http://localhost:3002
+![alt text](./assets/grafana_dashboard.png)
+- Dashboard: http://localhost:3002/d/mlops-inference
 - Login: admin / admin
-- Add Prometheus data source: http://prometheus:9090
+- **Pre-configured**: Prometheus datasource and MLOps dashboard are auto-provisioned
+
+The MLOps Inference Dashboard includes:
+- Total Predictions counter
+- Total Model Retrains counter
+- API Status indicator
+- Prediction Request Rate graph
+- Model Retrain Events timeline
+- Cumulative Metrics Over Time
 
 ## Local Development
 
