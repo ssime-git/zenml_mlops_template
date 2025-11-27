@@ -26,6 +26,9 @@ services:
       ZENML_DEFAULT_USER_EMAIL: admin@zenml.io
       ZENML_AUTH_TYPE: default
       ZENML_STORE_TYPE: sql
+      ZENML_LOCAL_STORES_PATH: /zenml-artifacts  # Must match pipeline-runner path
+    volumes:
+      - zenml_artifacts:/zenml-artifacts  # Shared artifact store
     depends_on:
       mysql:
         condition: service_healthy
@@ -56,9 +59,11 @@ services:
       dockerfile: dockerfiles/Dockerfile.pipeline-runner
     volumes:
       - ./data-file:/app/data-file
+      - zenml_artifacts:/zenml-artifacts  # Shared artifact store with ZenML server
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ZENML_STORE_URL: http://zenml:8080
+      ZENML_LOCAL_STORES_PATH: /zenml-artifacts  # Use shared volume for artifacts
       # Admin credentials for auto-creating service account (must match zenml service)
       ZENML_DEFAULT_USER_NAME: admin
       ZENML_DEFAULT_USER_PASSWORD: ${ZENML_PASSWORD:-zenml}
@@ -120,3 +125,4 @@ volumes:
   mysql_data:
   prometheus_data:
   grafana_data:
+  zenml_artifacts:  # Shared artifact store for ZenML lineage

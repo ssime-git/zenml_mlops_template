@@ -1,4 +1,4 @@
-.PHONY: help up down build logs train retrain clean public private
+.PHONY: help up down build logs train retrain clean public private zenml
 
 help:
 	@echo "ZenML MLOps Template - Available commands:"
@@ -9,7 +9,10 @@ help:
 	@echo "  make logs      - View logs from all services"
 	@echo "  make train     - Run the ML training pipeline"
 	@echo "  make retrain   - Trigger model retraining via API"
+	@echo "  make predict   - Make example prediction"
+	@echo "  make health    - Check API health"
 	@echo "  make clean     - Remove all containers, volumes, and data"
+	@echo "  make zenml CMD=\"...\" - Run ZenML CLI commands"
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make up && make train"
@@ -65,9 +68,16 @@ install-local:
 run-local:
 	python run_pipeline.py
 
+# ZenML CLI - run any zenml command
+# Usage: make zenml CMD="pipeline list"
+#        make zenml CMD="artifact list"  
+#        make zenml CMD="stack describe"
+zenml:
+	docker compose --profile pipeline run --rm --entrypoint /app/zenml_cli.sh pipeline-runner $(CMD)
+
 # GitHub repository visibility
-public:
+make-public:
 	gh repo edit --visibility public --accept-visibility-change-consequences
 
-private:
+make-private:
 	gh repo edit --visibility private --accept-visibility-change-consequences

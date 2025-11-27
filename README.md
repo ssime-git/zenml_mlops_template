@@ -2,6 +2,32 @@
 
 A complete MLOps pipeline using ZenML, MLflow, FastAPI, and Docker.
 
+## Why ZenML?
+
+While tools like **Airflow** and **Prefect** are excellent general-purpose workflow orchestrators, **ZenML** is purpose-built for ML pipelines:
+
+| Feature | ZenML | Airflow/Prefect |
+|---------|-------|-----------------|
+| **ML-First Design** | Built specifically for ML workflows with native artifact tracking, model versioning, and experiment management | General-purpose DAG orchestration requiring custom integrations |
+| **Artifact Lineage** | ✅ Automatic tracking of data, models, and metadata between pipeline steps (used in this project) | Manual implementation needed |
+| **MLflow Integration** | Native integration with MLflow for experiment tracking and model registry | Requires custom operators/tasks |
+| **Reproducibility** | Built-in versioning of pipelines, data, and models | Must be implemented manually |
+| **Stack Abstraction** | Swap infrastructure (local → cloud) without code changes | Tied to specific infrastructure |
+| **Minimal Boilerplate** | Simple `@step` and `@pipeline` decorators | More verbose DAG definitions |
+
+### When to Use ZenML
+
+- ✅ ML model training and deployment pipelines
+- ✅ Experiment tracking and model versioning
+- ✅ Team collaboration on ML projects
+- ✅ Reproducible ML workflows
+
+### When Airflow/Prefect Might Be Better
+
+- ⚠️ Complex ETL workflows without ML components
+- ⚠️ Existing Airflow/Prefect infrastructure investment
+- ⚠️ Non-ML data engineering tasks
+
 ## Quick Start
 
 ```bash
@@ -120,6 +146,7 @@ make predict   # Make example prediction
 make health    # Check API health
 make clean     # Remove containers and data
 ```
+![alt text](./assets/zenml_pipeline.png)
 
 ### Docker Compose Commands
 
@@ -135,6 +162,43 @@ docker compose logs -f <service-name>
 
 # Stop everything
 docker compose down -v
+```
+
+### ZenML Dashboard
+
+The ZenML Dashboard provides a visual interface for exploring pipelines, runs, and artifacts:
+
+```
+http://localhost:8888
+Login: admin / zenml
+```
+
+**Dashboard Features:**
+- **Pipelines** - View all registered pipelines
+- **Runs** - Browse pipeline execution history
+- **Artifacts** - Explore versioned data and models with lineage
+- **DAG View** - Visualize pipeline structure and data flow
+- **Stacks** - Manage infrastructure configurations
+
+### ZenML CLI
+
+Run ZenML CLI commands via Docker:
+
+```bash
+# List pipelines
+make zenml CMD="pipeline list"
+
+# List pipeline runs
+make zenml CMD="pipeline runs list"
+
+# List artifacts (with lineage)
+make zenml CMD="artifact list"
+
+# Show current stack
+make zenml CMD="stack describe"
+
+# Get help
+make zenml CMD="--help"
 ```
 
 ## API Endpoints
@@ -194,10 +258,26 @@ curl http://localhost:8000/metrics
 
 ## Training Pipeline
 
-The pipeline consists of two ZenML steps:
+The pipeline consists of two ZenML steps with **full artifact lineage**:
 
-1. **preprocess_data**: Loads the Iris dataset and saves preprocessed CSV
+1. **preprocess_data**: Loads Iris dataset, splits into train/test sets
+   - Outputs: `X_train`, `X_test`, `y_train`, `y_test` (versioned DataFrames)
 2. **train_model**: Trains RandomForest classifier, registers in MLflow Model Registry
+   - Inputs: Receives artifacts from step 1 with full lineage tracking
+   - Outputs: `model_uri` with metadata (accuracy, promotion status)
+
+### Artifact Lineage
+
+ZenML automatically tracks all artifacts passed between steps. View the lineage in the ZenML Dashboard:
+
+```
+http://localhost:8888 → Pipelines → iris_classification_pipeline → Select Run → DAG View
+```
+
+Each artifact shows:
+- **Version**: Unique ID for reproducibility
+- **Metadata**: Shape, dtype, custom metrics
+- **Lineage**: Which step produced it, which steps consumed it
 
 ### Model Registry
 

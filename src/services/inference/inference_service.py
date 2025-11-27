@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import mlflow
 import mlflow.sklearn
 import numpy as np
+import pandas as pd
 import os
 import subprocess
 from prometheus_client import Counter, make_asgi_app
@@ -114,13 +115,13 @@ def predict(features: IrisFeatures):
     # Increment the prediction counter
     prediction_count.inc()
     
-    # Prepare the data for prediction
-    data = [[
-        features.sepal_length,
-        features.sepal_width,
-        features.petal_length,
-        features.petal_width
-    ]]
+    # Prepare the data for prediction with feature names matching training data
+    data = pd.DataFrame([{
+        "sepal length (cm)": features.sepal_length,
+        "sepal width (cm)": features.sepal_width,
+        "petal length (cm)": features.petal_length,
+        "petal width (cm)": features.petal_width
+    }])
     
     # Make the prediction
     pred_class = int(model.predict(data)[0])

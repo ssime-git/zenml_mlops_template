@@ -1,12 +1,11 @@
 # train_model.py
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 import mlflow
 import mlflow.sklearn
 from mlflow.tracking import MlflowClient
-import os
-from zenml import step
+from zenml import step, log_metadata
+from typing import Annotated
 
 # Model Registry configuration
 MODEL_NAME = "iris-classifier"
@@ -68,25 +67,25 @@ def register_and_promote_model(client: MlflowClient, run_id: str, new_accuracy: 
 
 
 @step(name="train_model")
-def train_model(data_path: str) -> str:
+def train_model(
+    X_train: pd.DataFrame,
+    X_test: pd.DataFrame,
+    y_train: pd.Series,
+    y_test: pd.Series,
+) -> Annotated[str, "model_uri"]:
     """
-    ZenML step that trains a RandomForest model on the preprocessed data and logs metrics to MLflow.
+    ZenML step that trains a RandomForest model and logs to MLflow.
     Uses Model Registry to track versions and only promotes to production if accuracy improves.
     
     Args:
-        data_path: Path to the preprocessed data CSV file
+        X_train: Training features (ZenML artifact)
+        X_test: Test features (ZenML artifact)
+        y_train: Training labels (ZenML artifact)
+        y_test: Test labels (ZenML artifact)
         
     Returns:
-        str: Path to the saved model in MLflow
+        model_uri: MLflow model URI (ZenML artifact)
     """
-    # Load preprocessed data from shared volume
-    df = pd.read_csv(data_path)
-    X = df.drop("target", axis=1)
-    y = df["target"]
-
-    # Split data into training and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
     # Set MLflow tracking URI 
     mlflow.set_tracking_uri("http://mlflow:5000")
     mlflow.set_experiment(EXPERIMENT_NAME)
@@ -100,12 +99,14 @@ def train_model(data_path: str) -> str:
         n_estimators = 50
         model = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
         mlflow.log_param("n_estimators", n_estimators)
+        mlflow.log_param("train_samples", len(X_train))
+        mlflow.log_param("test_samples", len(X_test))
 
         model.fit(X_train, y_train)
         accuracy = model.score(X_test, y_test)
         mlflow.log_metric("accuracy", accuracy)
 
-        # Log model artifact to MLflow with signature
+        # Log model artifact to MLflow
         mlflow.sklearn.log_model(
             model, 
             artifact_path="model",
@@ -117,6 +118,17 @@ def train_model(data_path: str) -> str:
         
         # Register and potentially promote the model
         promoted = register_and_promote_model(client, run.info.run_id, accuracy, production_accuracy)
+        
+        # Log metadata to ZenML for lineage tracking
+        log_metadata(
+            metadata={
+                "mlflow_run_id": run.info.run_id,
+                "accuracy": accuracy,
+                "promoted_to_production": promoted,
+                "n_estimators": n_estimators,
+            },
+            infer_artifact=True,
+        )
         
         # Return the MLflow model URI
         model_uri = f"runs:/{run.info.run_id}/model"

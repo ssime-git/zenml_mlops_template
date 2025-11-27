@@ -20,6 +20,7 @@ COPY run_pipeline.py /app/run_pipeline.py
 
 # Script to connect to ZenML server and run pipeline
 COPY scripts/run_zenml_pipeline.sh /app/run_zenml_pipeline.sh
-RUN chmod +x /app/run_zenml_pipeline.sh
+COPY scripts/zenml_cli.sh /app/zenml_cli.sh
+RUN chmod +x /app/run_zenml_pipeline.sh /app/zenml_cli.sh
 
 ENTRYPOINT ["/app/run_zenml_pipeline.sh"]
