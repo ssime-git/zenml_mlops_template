@@ -120,14 +120,19 @@ def train_model(
         promoted = register_and_promote_model(client, run.info.run_id, accuracy, production_accuracy)
         
         # Log metadata to ZenML for lineage tracking
+        # Organized metadata (shows as cards in dashboard)
         log_metadata(
             metadata={
-                "mlflow_run_id": run.info.run_id,
-                "accuracy": accuracy,
-                "promoted_to_production": promoted,
-                "n_estimators": n_estimators,
+                "model_metrics": {
+                    "accuracy": accuracy,
+                    "n_estimators": n_estimators,
+                },
+                "mlflow_info": {
+                    "run_id": run.info.run_id,
+                    "model_name": MODEL_NAME,
+                    "promoted_to_production": promoted,
+                },
             },
-            infer_artifact=True,
         )
         
         # Return the MLflow model URI

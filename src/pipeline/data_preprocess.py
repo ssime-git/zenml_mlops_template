@@ -3,7 +3,7 @@ from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
-from zenml import step
+from zenml import step, log_metadata
 from typing import Tuple, Annotated
 
 
@@ -39,6 +39,26 @@ def preprocess_data() -> Tuple[
     print(f"[preprocess_data] Dataset loaded: {len(df)} samples")
     print(f"[preprocess_data] Train set: {len(X_train)} samples")
     print(f"[preprocess_data] Test set: {len(X_test)} samples")
+    
+    # Log metadata for this step
+    log_metadata(
+        metadata={
+            "dataset_info": {
+                "name": "Iris",
+                "total_samples": len(df),
+                "num_features": len(iris.feature_names),
+                "num_classes": len(iris.target_names),
+                "feature_names": list(iris.feature_names),
+                "class_names": list(iris.target_names),
+            },
+            "split_info": {
+                "train_samples": len(X_train),
+                "test_samples": len(X_test),
+                "test_size": 0.2,
+                "random_state": 42,
+            },
+        },
+    )
     
     return X_train, X_test, y_train, y_test
 

@@ -1,5 +1,6 @@
 # run_pipeline.py
-from zenml import pipeline
+from zenml import pipeline, get_pipeline_context, log_metadata
+from datetime import datetime
 
 # Import steps from src/pipeline modules
 from src.pipeline.data_preprocess import preprocess_data
@@ -26,5 +27,24 @@ def iris_pipeline():
 
 
 if __name__ == "__main__":
+    from zenml.client import Client
+    
     # Run the pipeline
-    iris_pipeline()
+    run = iris_pipeline()
+    
+    # Log pipeline-level metadata after successful run
+    log_metadata(
+        metadata={
+            "pipeline_info": {
+                "description": "Iris flower classification pipeline",
+                "model_type": "RandomForestClassifier",
+                "mlflow_experiment": "iris_classification",
+                "mlflow_model_name": "iris-classifier",
+            },
+            "execution_info": {
+                "timestamp": datetime.now().isoformat(),
+                "python_version": "3.12",
+            },
+        },
+        run_id_name_or_prefix=str(run.id),
+    )

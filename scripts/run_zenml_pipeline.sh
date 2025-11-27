@@ -107,7 +107,39 @@ echo ""
 echo "Connecting to ZenML server..."
 export ZENML_STORE_URL="$ZENML_URL"
 
+# Setup S3/MinIO artifact store if not already configured
+echo ""
+echo "Setting up S3 artifact store (MinIO)..."
+
+# Check if s3-artifacts store exists
+S3_STORE_EXISTS=$(zenml artifact-store list 2>/dev/null | grep -c "s3-artifacts" || true)
+
+if [ "$S3_STORE_EXISTS" = "0" ]; then
+    echo "Registering S3 artifact store..."
+    zenml artifact-store register s3-artifacts \
+        --flavor=s3 \
+        --path=s3://zenml-artifacts \
+        --client_kwargs='{"endpoint_url": "http://minio:9000"}' \
+        2>/dev/null || echo "Artifact store may already exist"
+fi
+
+# Check if s3-stack exists
+S3_STACK_EXISTS=$(zenml stack list 2>/dev/null | grep -c "s3-stack" || true)
+
+if [ "$S3_STACK_EXISTS" = "0" ]; then
+    echo "Registering S3 stack..."
+    zenml stack register s3-stack \
+        -a s3-artifacts \
+        -o default \
+        2>/dev/null || echo "Stack may already exist"
+fi
+
+# Set the S3 stack as active
+echo "Setting s3-stack as active..."
+zenml stack set s3-stack 2>/dev/null || true
+
 # Run the ZenML pipeline
+echo ""
 echo "Running ZenML pipeline..."
 cd /app
 python run_pipeline.py
