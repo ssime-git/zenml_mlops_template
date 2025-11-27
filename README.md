@@ -141,7 +141,7 @@ graph TD
 
 Watch the full demo of this MLOps template in action:
 
-<div><a href="https://us02web.zoom.us/clips/share/q0yjBNlwSLukbmncGEoJ1A"><p>MLOps with ZenML</p></a><a href="https://us02web.zoom.us/clips/share/q0yjBNlwSLukbmncGEoJ1A"><img style="max-width: 300px; border-radius: 10px;" src="https://file.zoom.us/public/file/bbIbD5LdRPKMqiHz7IDavw/MS4zLiVdp6HRPG02qpMYMrzstiGrzLunPOBrHFdw3cJ7lnSB/r0Gjw_nZSrmCfGmiHgyOag.gif" /></a></div>
+<div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%;"><iframe src="https://us02web.zoom.us/clips/embed/q0yjBNlwSLukbmncGEoJ1A" frameborder="0" allowfullscreen="allowfullscreen" style="position: absolute; width: 100%; height: 100%; top: 0; left: 0;"></iframe></div>
 
 ### Prerequisites
 
