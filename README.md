@@ -141,7 +141,7 @@ graph TD
 
 Watch the full demo of this MLOps template in action:
 
-<div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%;"><iframe src="https://us02web.zoom.us/clips/embed/q0yjBNlwSLukbmncGEoJ1A" frameborder="0" allowfullscreen="allowfullscreen" style="position: absolute; width: 100%; height: 100%; top: 0; left: 0;"></iframe></div>
+https://github.com/user-attachments/assets/ca0e278e-9528-4961-a1c9-92502dee7ff0
 
 ### Prerequisites
 
